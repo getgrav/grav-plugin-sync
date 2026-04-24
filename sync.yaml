@@ -1,0 +1,15 @@
+enabled: true
+
+storage:
+  adapter: file
+
+squash:
+  idle_seconds: 60
+  max_log_bytes: 524288
+
+presence:
+  ttl_seconds: 30
+
+polling:
+  idle_interval_ms: 4000
+  active_interval_ms: 1000

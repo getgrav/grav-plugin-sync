@@ -1,0 +1,107 @@
+name: Sync
+slug: sync
+type: plugin
+version: 0.1.0
+description: Real-time collaboration substrate for Grav. Stores Yjs CRDT updates and presence state for multi-user editing. Transport-agnostic; works with polling, Mercure, or WebSocket providers.
+icon: users
+author:
+  name: Team Grav
+  email: devs@getgrav.org
+  url: https://getgrav.org
+homepage: https://github.com/getgrav/grav-plugin-sync
+keywords: collaboration, yjs, crdt, realtime, sync
+bugs: https://github.com/getgrav/grav-plugin-sync/issues
+license: MIT
+compatibility:
+  grav: ['2.0']
+
+dependencies:
+  - { name: grav, version: '>=2.0.0-beta.1' }
+
+form:
+  validation: loose
+  fields:
+    enabled:
+      type: toggle
+      label: Plugin Status
+      highlight: 1
+      default: 1
+      options:
+        1: Enabled
+        0: Disabled
+      validate:
+        type: bool
+
+    section_storage:
+      type: section
+      title: Storage
+      underline: true
+
+    storage.adapter:
+      type: select
+      label: Storage Adapter
+      default: file
+      help: Where Yjs update logs and snapshots are persisted. File is the default and works everywhere. SQLite requires the database plugin and is recommended for high-concurrency sites.
+      options:
+        file: File (page-sibling sidecar)
+        sqlite: SQLite (via database plugin)
+
+    section_squash:
+      type: section
+      title: Squash
+      underline: true
+
+    squash.idle_seconds:
+      type: number
+      label: Idle Timeout (seconds)
+      default: 60
+      help: How long a room must have no presence before the collaboration log is squashed back into the canonical markdown file and truncated.
+      validate:
+        type: int
+        min: 5
+
+    squash.max_log_bytes:
+      type: number
+      label: Max Log Size (bytes)
+      default: 524288
+      help: Forces an immediate squash when the update log grows beyond this size, regardless of activity. Default 512KB.
+      validate:
+        type: int
+        min: 4096
+
+    section_presence:
+      type: section
+      title: Presence
+      underline: true
+
+    presence.ttl_seconds:
+      type: number
+      label: Heartbeat TTL (seconds)
+      default: 30
+      help: How long a client is considered present after its last heartbeat. Tabs that disappear without explicit disconnect time out after this.
+      validate:
+        type: int
+        min: 5
+
+    section_polling:
+      type: section
+      title: Polling Defaults
+      underline: true
+
+    polling.idle_interval_ms:
+      type: number
+      label: Idle Poll Interval (ms)
+      default: 4000
+      help: How often clients poll when editing alone. Clients use this as a default; servers can suggest a different cadence in the capabilities response.
+      validate:
+        type: int
+        min: 500
+
+    polling.active_interval_ms:
+      type: number
+      label: Active Poll Interval (ms)
+      default: 1000
+      help: How often clients poll when at least one other collaborator is present in the same room.
+      validate:
+        type: int
+        min: 250

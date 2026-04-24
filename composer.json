@@ -1,0 +1,48 @@
+{
+    "name": "getgrav/grav-plugin-sync",
+    "type": "grav-plugin",
+    "description": "Real-time collaboration substrate for Grav (Yjs CRDT storage + presence)",
+    "keywords": ["collaboration", "yjs", "crdt", "realtime", "sync", "plugin"],
+    "homepage": "https://github.com/getgrav/grav-plugin-sync",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Team Grav",
+            "email": "devs@getgrav.org",
+            "homepage": "https://getgrav.org",
+            "role": "Developer"
+        }
+    ],
+    "support": {
+        "issues": "https://github.com/getgrav/grav-plugin-sync/issues"
+    },
+    "require": {
+        "php": "^8.3",
+        "ext-json": "*",
+        "psr/simple-cache": "^2.0 || ^3.0"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^11.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Grav\\Plugin\\Sync\\": "classes/Sync"
+        },
+        "classmap": [
+            "sync.php"
+        ]
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Grav\\Plugin\\Sync\\Tests\\": "tests"
+        }
+    },
+    "config": {
+        "platform": {
+            "php": "8.3"
+        }
+    },
+    "scripts": {
+        "test": "vendor/bin/phpunit"
+    }
+}
