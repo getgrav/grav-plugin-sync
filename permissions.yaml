@@ -1,0 +1,9 @@
+actions:
+  api.collab:
+    type: access
+    label: Collaboration API
+    actions:
+      read:
+        label: Read collaboration state (pull, presence)
+      write:
+        label: Push collaboration updates / heartbeat presence

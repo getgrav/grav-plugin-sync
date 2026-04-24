@@ -17,6 +17,8 @@ compatibility:
 
 dependencies:
   - { name: grav, version: '>=2.0.0-beta.1' }
+  - { name: api, version: '>=1.0.0-beta.12' }
+  - { name: login, version: '>=3.8.0' }
 
 form:
   validation: loose
