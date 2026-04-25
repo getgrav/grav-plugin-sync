@@ -138,6 +138,65 @@ class SyncController extends AbstractApiController
     }
 
     // ------------------------------------------------------------------
+    // POST /sync/pages/{route:.+}/init
+    // ------------------------------------------------------------------
+
+    /**
+     * Atomically seed the room iff its log is empty. Resolves the empty-
+     * room race where two clients opening a fresh page would otherwise
+     * both push their seed and double-apply initial state.
+     *
+     * Winners get `{seeded: true}`; losers get `{seeded: false, updates}`
+     * carrying the canonical state in one round trip so they don't have
+     * to wait for the next pull tick to learn what the winner wrote.
+     */
+    public function init(ServerRequestInterface $request): ResponseInterface
+    {
+        $this->requirePermission($request, self::PERMISSION_WRITE);
+        $this->requirePermission($request, 'api.pages.write');
+
+        $body = $this->getRequestBody($request);
+        $room = $this->resolveRoom($request, $body);
+        $this->requireFields($body, ['seed']);
+
+        $seed = base64_decode((string)$body['seed'], true);
+        if ($seed === false || $seed === '') {
+            throw new ValidationException('`seed` must be non-empty base64-encoded bytes.');
+        }
+
+        $clientId = isset($body['clientId']) ? (string)$body['clientId'] : null;
+        $storage = $this->storage();
+        $result = $storage->initIfEmpty($room->id, $seed);
+
+        $response = [
+            'seeded' => $result['seeded'],
+            'offset' => $result['size'],
+            'size' => $result['size'],
+            'room' => $room->id,
+        ];
+
+        if ($result['seeded']) {
+            // Notify transport plugins so peers learn about the seed.
+            // sync-mercure republishes onto the SSE channel so any peer
+            // subscribed before the loser-path pull also picks it up.
+            $this->grav->fireEvent('onSyncUpdate', new \RocketTheme\Toolbox\Event\Event([
+                'room' => $room,
+                'clientId' => $clientId,
+                'update' => $seed,
+                'updateBytes' => strlen($seed),
+            ]));
+        } else {
+            // Loser path — return the current log inline so the caller
+            // can adopt the winner's state without an extra pull.
+            $res = $storage->getUpdatesSince($room->id, 0);
+            $response['offset'] = $res['offset'];
+            $response['updates'] = array_map('base64_encode', $res['updates']);
+        }
+
+        return ApiResponse::create($response);
+    }
+
+    // ------------------------------------------------------------------
     // POST /sync/pages/{route:.+}/presence
     // ------------------------------------------------------------------
 

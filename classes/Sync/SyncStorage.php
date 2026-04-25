@@ -27,6 +27,24 @@ interface SyncStorage
     public function appendUpdate(string $roomId, string $update, ?string $clientId = null): int;
 
     /**
+     * Atomically seed the room's log if and only if it is currently empty.
+     *
+     * Resolves the empty-room race: when two clients open a fresh page at
+     * the same time both observe `map.size === 0` locally and would each
+     * push their own seed update, double-applying initial state. The
+     * server arbitrates here under an exclusive file lock — only the
+     * caller that finds the log empty has its seed appended; everyone
+     * else gets `seeded=false` and adopts the existing state via pull.
+     *
+     * @param string $roomId Canonical room id.
+     * @param string $seed Raw binary Yjs update bytes representing the seed.
+     * @return array{seeded: bool, size: int}
+     *         seeded: whether this caller's seed was the one that landed
+     *         size:   current log size in bytes after the operation
+     */
+    public function initIfEmpty(string $roomId, string $seed): array;
+
+    /**
      * Read all updates after the given offset.
      *
      * @return array{updates: list<string>, offset: int, size: int}

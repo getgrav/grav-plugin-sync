@@ -124,6 +124,59 @@ final class FileSyncStorageTest extends TestCase
         $s->appendUpdate('foo@default', str_repeat('x', 101));
     }
 
+    public function test_init_seeds_when_empty(): void
+    {
+        $s = $this->storage();
+        $room = 'fresh@default';
+        $seed = random_bytes(32);
+
+        $res = $s->initIfEmpty($room, $seed);
+        $this->assertTrue($res['seeded']);
+        $this->assertSame(4 + 32, $res['size']);
+
+        // The seed should be readable as an ordinary update.
+        $pull = $s->getUpdatesSince($room, 0);
+        $this->assertCount(1, $pull['updates']);
+        $this->assertSame($seed, $pull['updates'][0]);
+    }
+
+    public function test_init_refuses_when_log_exists(): void
+    {
+        $s = $this->storage();
+        $room = 'taken@default';
+        $first = random_bytes(16);
+        $second = random_bytes(16);
+
+        $r1 = $s->initIfEmpty($room, $first);
+        $this->assertTrue($r1['seeded']);
+
+        $r2 = $s->initIfEmpty($room, $second);
+        $this->assertFalse($r2['seeded']);
+        $this->assertSame($r1['size'], $r2['size']);
+
+        // Loser's seed must NOT have been written.
+        $pull = $s->getUpdatesSince($room, 0);
+        $this->assertCount(1, $pull['updates']);
+        $this->assertSame($first, $pull['updates'][0]);
+    }
+
+    public function test_init_refuses_when_appendUpdate_already_ran(): void
+    {
+        $s = $this->storage();
+        $room = 'append-first@default';
+        $s->appendUpdate($room, random_bytes(16));
+
+        $res = $s->initIfEmpty($room, random_bytes(16));
+        $this->assertFalse($res['seeded']);
+    }
+
+    public function test_init_refuses_empty_seed(): void
+    {
+        $s = $this->storage();
+        $this->expectException(RuntimeException::class);
+        $s->initIfEmpty('e@default', '');
+    }
+
     public function test_path_traversal_blocked(): void
     {
         $s = $this->storage();

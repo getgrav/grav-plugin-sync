@@ -88,6 +88,7 @@ class SyncPlugin extends Plugin
         $routes->group('/sync/pages/{route:.+}', function ($r): void {
             $r->post('/pull',     [SyncController::class, 'pull']);
             $r->post('/push',     [SyncController::class, 'push']);
+            $r->post('/init',     [SyncController::class, 'init']);
             $r->post('/presence', [SyncController::class, 'presence']);
         });
     }

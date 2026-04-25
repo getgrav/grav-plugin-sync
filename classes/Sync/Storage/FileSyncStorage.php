@@ -71,6 +71,48 @@ final class FileSyncStorage implements SyncStorage
         }
     }
 
+    public function initIfEmpty(string $roomId, string $seed): array
+    {
+        if ($seed === '') {
+            throw new RuntimeException('sync: refusing to seed empty bytes');
+        }
+        if (strlen($seed) > $this->maxUpdateBytes) {
+            throw new RuntimeException('sync: seed exceeds max size');
+        }
+
+        $logPath = $this->logPath($roomId);
+        $this->ensureDir(dirname($logPath));
+
+        // Open with c+b: create if missing, read+write, no truncation. The
+        // exclusive lock then serializes against any concurrent appender
+        // racing into the same empty room. clearstatcache is required
+        // because PHP caches filesize() results within the request.
+        $fp = fopen($logPath, 'c+b');
+        if (!$fp) {
+            throw new RuntimeException("sync: cannot open log for init: {$logPath}");
+        }
+        try {
+            if (!flock($fp, LOCK_EX)) {
+                throw new RuntimeException('sync: could not acquire init lock');
+            }
+            clearstatcache(true, $logPath);
+            $size = (int)(filesize($logPath) ?: 0);
+            if ($size > 0) {
+                flock($fp, LOCK_UN);
+                return ['seeded' => false, 'size' => $size];
+            }
+            fseek($fp, 0, SEEK_END);
+            fwrite($fp, pack('N', strlen($seed)));
+            fwrite($fp, $seed);
+            fflush($fp);
+            $newSize = (int)ftell($fp);
+            flock($fp, LOCK_UN);
+            return ['seeded' => true, 'size' => $newSize];
+        } finally {
+            fclose($fp);
+        }
+    }
+
     public function getUpdatesSince(string $roomId, int $offset): array
     {
         $logPath = $this->logPath($roomId);
