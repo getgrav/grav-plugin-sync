@@ -46,7 +46,7 @@ class SyncController extends AbstractApiController
         $idle = (int)$this->config->get('plugins.sync.polling.idle_interval_ms', 4000);
         $active = (int)$this->config->get('plugins.sync.polling.active_interval_ms', 1000);
 
-        return ApiResponse::create([
+        $caps = [
             'transports' => ['polling'],
             'preferred' => 'polling',
             'polling' => [
@@ -56,7 +56,17 @@ class SyncController extends AbstractApiController
             'presence' => [
                 'ttl_seconds' => (int)$this->config->get('plugins.sync.presence.ttl_seconds', 30),
             ],
-        ]);
+        ];
+
+        // Let transport plugins (e.g. grav-plugin-sync-mercure) enrich
+        // the capabilities response with their own advertisement data.
+        // The event payload is passed by reference so subscribers can
+        // mutate it directly.
+        $event = new \RocketTheme\Toolbox\Event\Event(['capabilities' => $caps]);
+        $this->grav->fireEvent('onSyncCapabilities', $event);
+        $caps = $event['capabilities'] ?? $caps;
+
+        return ApiResponse::create($caps);
     }
 
     // ------------------------------------------------------------------
@@ -109,9 +119,14 @@ class SyncController extends AbstractApiController
         $clientId = isset($body['clientId']) ? (string)$body['clientId'] : null;
         $size = $this->storage()->appendUpdate($room->id, $update, $clientId);
 
+        // The event carries the raw update bytes so transports like
+        // grav-plugin-sync-mercure can republish to their hub on the side.
+        // Subscribers that only care about activity counts can read
+        // `updateBytes` (the size).
         $this->grav->fireEvent('onSyncUpdate', new \RocketTheme\Toolbox\Event\Event([
             'room' => $room,
             'clientId' => $clientId,
+            'update' => $update,
             'updateBytes' => strlen($update),
         ]));
 
@@ -146,6 +161,18 @@ class SyncController extends AbstractApiController
                 $userName = (string)($user->get('fullname') ?? $user->username ?? $clientId);
                 $meta = is_array($body['meta'] ?? null) ? $body['meta'] : [];
                 $presence->heartbeat($room->id, $clientId, $userName, $meta);
+
+                // Fire an event so transports like sync-mercure can
+                // republish awareness deltas on a low-latency channel.
+                // Polling peers still receive awareness through the
+                // response body — this is purely an additional fast path.
+                if (isset($meta['awarenessUpdate']) && is_string($meta['awarenessUpdate']) && $meta['awarenessUpdate'] !== '') {
+                    $this->grav->fireEvent('onSyncAwareness', new \RocketTheme\Toolbox\Event\Event([
+                        'room' => $room,
+                        'clientId' => $clientId,
+                        'awarenessUpdateB64' => $meta['awarenessUpdate'],
+                    ]));
+                }
             }
         }
 
