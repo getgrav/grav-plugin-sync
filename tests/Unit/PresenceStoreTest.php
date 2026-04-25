@@ -134,6 +134,36 @@ final class PresenceStoreTest extends TestCase
         $this->assertSame(99, $peers[0]['meta']['cursor']);
     }
 
+    public function test_heartbeat_preserves_joined_at_across_refreshes(): void
+    {
+        $p = new PresenceStore($this->cache, ttlSeconds: 30);
+        $p->heartbeat('room-a', 'c1', 'alice');
+        $first = $p->peers('room-a');
+        $joinedAt = $first[0]['joinedAt'];
+        $this->assertGreaterThan(0, $joinedAt);
+
+        // Sleep a beat then heartbeat again. joinedAt must NOT shift.
+        sleep(1);
+        $p->heartbeat('room-a', 'c1', 'alice');
+        $second = $p->peers('room-a');
+        $this->assertSame($joinedAt, $second[0]['joinedAt']);
+    }
+
+    public function test_first_joiner_has_earliest_joined_at(): void
+    {
+        $p = new PresenceStore($this->cache, ttlSeconds: 30);
+        $p->heartbeat('room-a', 'c1', 'alice');
+        sleep(1);
+        $p->heartbeat('room-a', 'c2', 'bob');
+
+        $peers = $p->peers('room-a');
+        $byId = [];
+        foreach ($peers as $peer) {
+            $byId[$peer['clientId']] = $peer;
+        }
+        $this->assertLessThan($byId['c2']['joinedAt'], $byId['c1']['joinedAt']);
+    }
+
     public function test_expired_peer_purged_on_read(): void
     {
         // Negative TTL to simulate an already-expired entry.

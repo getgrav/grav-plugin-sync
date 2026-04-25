@@ -16,7 +16,7 @@ use Psr\SimpleCache\CacheInterface;
  * out or they get purged on next read.
  *
  * Read shape from peers():
- *   [ ['clientId' => '...', 'user' => '...', 'meta' => [...], 'age' => 3], ... ]
+ *   [ ['clientId' => '...', 'user' => '...', 'meta' => [...], 'age' => 3, 'joinedAt' => 1714050000], ... ]
  */
 final class PresenceStore
 {
@@ -39,11 +39,17 @@ final class PresenceStore
     {
         $map = $this->load($roomId);
         $now = time();
+        $existing = $map[$clientId] ?? null;
         $map[$clientId] = [
             'user' => $user,
             'meta' => $meta,
             'expiresAt' => $now + $this->ttlSeconds,
             'lastSeen' => $now,
+            // Preserve the original join timestamp across heartbeats so
+            // first-joiner-wins logic (e.g. editor-type lock on the
+            // client) can identify the canonical "owner" of a room
+            // independent of who happens to be heartbeating right now.
+            'joinedAt' => $existing['joinedAt'] ?? $now,
         ];
         $this->save($roomId, $map);
     }
@@ -90,6 +96,7 @@ final class PresenceStore
                 'user' => $entry['user'] ?? null,
                 'meta' => $entry['meta'] ?? [],
                 'age' => max(0, $now - (int)($entry['lastSeen'] ?? $now)),
+                'joinedAt' => (int)($entry['joinedAt'] ?? $entry['lastSeen'] ?? $now),
             ];
         }
         return $out;
@@ -136,7 +143,7 @@ final class PresenceStore
     }
 
     /**
-     * @return array<string, array{user: ?string, meta: array<string, mixed>, expiresAt: int, lastSeen: int}>
+     * @return array<string, array{user: ?string, meta: array<string, mixed>, expiresAt: int, lastSeen: int, joinedAt?: int}>
      */
     private function load(string $roomId): array
     {
@@ -148,7 +155,7 @@ final class PresenceStore
     }
 
     /**
-     * @param array<string, array{user: ?string, meta: array<string, mixed>, expiresAt: int, lastSeen: int}> $map
+     * @param array<string, array{user: ?string, meta: array<string, mixed>, expiresAt: int, lastSeen: int, joinedAt?: int}> $map
      */
     private function save(string $roomId, array $map): void
     {
