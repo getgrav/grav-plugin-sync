@@ -1,7 +1,7 @@
 name: Sync
 slug: sync
 type: plugin
-version: 1.0.0
+version: 1.0.1
 description: Real-time collaboration substrate for Grav. Stores Yjs CRDT updates and presence state for multi-user editing. Transport-agnostic; works with polling, Mercure, or WebSocket providers.
 icon: rotate
 author:

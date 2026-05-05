@@ -11,10 +11,16 @@ use RuntimeException;
  * File-backed SyncStorage.
  *
  * Layout (per room):
- *   <pagesRoot>/<route>/.sync/<template>.log     — append-only update log
- *   <pagesRoot>/<route>/.sync/<template>.state   — latest snapshot (optional)
+ *   <dataRoot>/<routeHash>/<template>[.<lang>].log     — append-only update log
+ *   <dataRoot>/<routeHash>/<template>[.<lang>].state   — latest snapshot
+ *   <dataRoot>/<routeHash>/meta.json                   — reverse-lookup info
  *
- * Log format (little-endian-agnostic; uses PHP pack 'N' = big-endian uint32):
+ * dataRoot is intentionally outside user/pages so sync data never appears as
+ * extra "pages" to Grav. routeHash = md5(route) — the route is otherwise an
+ * arbitrary string and we don't want it to collide with the page-folder
+ * naming rules (numeric prefixes, language suffixes, etc.).
+ *
+ * Log format (uses PHP pack 'N' = big-endian uint32):
  *   [4 bytes BE length N][N bytes: binary Yjs update]
  *   [4 bytes BE length N][N bytes: binary Yjs update]
  *   ...
@@ -26,17 +32,19 @@ use RuntimeException;
  * Concurrency: appends use flock(LOCK_EX) to serialize. Reads use LOCK_SH.
  * Snapshot writes use rename-swap for atomicity.
  *
- * Note: roomId may be any string; we route it through a safe-path sanitizer
- * in pathFor() so a malicious id cannot escape the pages root.
+ * Room id format: see RoomRegistry. Two- or three-segment "@"-delimited
+ * string: <route>@<template> or <route>@<template>@<lang>.
  */
 final class FileSyncStorage implements SyncStorage
 {
     public function __construct(
-        private readonly string $pagesRoot,
+        private readonly string $dataRoot,
         private readonly int $maxUpdateBytes = 10_000_000,
     ) {
-        if (!is_dir($pagesRoot)) {
-            throw new RuntimeException("FileSyncStorage: pages root does not exist: {$pagesRoot}");
+        if (!is_dir($dataRoot)) {
+            if (!@mkdir($dataRoot, 0755, true) && !is_dir($dataRoot)) {
+                throw new RuntimeException("FileSyncStorage: cannot create data root: {$dataRoot}");
+            }
         }
     }
 
@@ -50,7 +58,7 @@ final class FileSyncStorage implements SyncStorage
         }
 
         $logPath = $this->logPath($roomId);
-        $this->ensureDir(dirname($logPath));
+        $this->ensureRoomDir($roomId);
 
         $fp = fopen($logPath, 'ab');
         if (!$fp) {
@@ -81,7 +89,7 @@ final class FileSyncStorage implements SyncStorage
         }
 
         $logPath = $this->logPath($roomId);
-        $this->ensureDir(dirname($logPath));
+        $this->ensureRoomDir($roomId);
 
         // Open with c+b: create if missing, read+write, no truncation. The
         // exclusive lock then serializes against any concurrent appender
@@ -197,7 +205,7 @@ final class FileSyncStorage implements SyncStorage
     public function writeSnapshot(string $roomId, string $snapshot, string $stateVector): void
     {
         $path = $this->snapshotPath($roomId);
-        $this->ensureDir(dirname($path));
+        $this->ensureRoomDir($roomId);
         $header = pack('NNN', strlen($snapshot), strlen($stateVector), time());
         $payload = $header . $snapshot . $stateVector;
 
@@ -284,79 +292,106 @@ final class FileSyncStorage implements SyncStorage
 
     private function logPath(string $roomId): string
     {
-        [, $template] = $this->split($roomId);
-        return $this->roomDir($roomId) . '/' . $template . '.log';
+        $parts = $this->split($roomId);
+        return $this->roomDir($roomId) . '/' . $this->fileBase($parts['template'], $parts['lang']) . '.log';
     }
 
     private function snapshotPath(string $roomId): string
     {
-        [, $template] = $this->split($roomId);
-        return $this->roomDir($roomId) . '/' . $template . '.state';
+        $parts = $this->split($roomId);
+        return $this->roomDir($roomId) . '/' . $this->fileBase($parts['template'], $parts['lang']) . '.state';
+    }
+
+    private function fileBase(string $template, ?string $lang): string
+    {
+        return $lang === null ? $template : $template . '.' . $lang;
     }
 
     private function roomDir(string $roomId): string
     {
-        [$route] = $this->split($roomId);
-        $routePath = $this->sanitizeRoute($route);
-        return $this->pagesRoot . '/' . $routePath . '/.sync';
+        $parts = $this->split($roomId);
+        return $this->dataRoot . '/' . md5($parts['route']);
     }
 
     /**
-     * Room id format: "route@template" or just "route" (template defaults to
-     * "default"). Route may include language suffix as /path.<lang> — we
-     * don't interpret it here; it's just part of the folder path.
+     * Create the room dir (idempotent) and drop a meta.json so an admin can
+     * reverse-lookup what page a hash belongs to. Meta is best-effort —
+     * failure to write it is not fatal because the log is the source of
+     * truth.
+     */
+    private function ensureRoomDir(string $roomId): void
+    {
+        $dir = $this->roomDir($roomId);
+        if (!is_dir($dir)) {
+            if (!@mkdir($dir, 0755, true) && !is_dir($dir)) {
+                throw new RuntimeException("sync: cannot create room dir: {$dir}");
+            }
+        }
+        $metaPath = $dir . '/meta.json';
+        if (!is_file($metaPath)) {
+            $parts = $this->split($roomId);
+            $meta = [
+                'route' => $parts['route'],
+                'createdAt' => time(),
+            ];
+            @file_put_contents($metaPath, json_encode($meta, JSON_UNESCAPED_SLASHES) ?: '{}');
+        }
+    }
+
+    /**
+     * Room id formats:
+     *   "<route>@<template>"                — default language
+     *   "<route>@<template>@<lang>"         — explicit language
      *
-     * @return array{0: string, 1: string}
+     * @return array{route: string, template: string, lang: ?string}
      */
     private function split(string $roomId): array
     {
         if ($roomId === '') {
             throw new RuntimeException('sync: empty roomId');
         }
-        $atPos = strrpos($roomId, '@');
-        if ($atPos === false) {
-            return [$roomId, 'default'];
+        $parts = explode('@', $roomId);
+        $count = count($parts);
+        if ($count < 2 || $count > 3) {
+            throw new RuntimeException('sync: malformed roomId');
         }
-        $route = substr($roomId, 0, $atPos);
-        $template = substr($roomId, $atPos + 1);
+        $route = $parts[0];
+        $template = $parts[1];
+        $lang = $parts[2] ?? null;
         if ($route === '' || $template === '') {
             throw new RuntimeException('sync: malformed roomId');
         }
-        return [$route, $template];
+        $this->validateRoute($route);
+        if (!preg_match('/^[a-z0-9_-]+$/i', $template)) {
+            throw new RuntimeException("sync: invalid template segment: {$template}");
+        }
+        if ($lang !== null) {
+            if (!preg_match('/^[a-z]{2}(-[a-z]{2})?$/i', $lang)) {
+                throw new RuntimeException("sync: invalid lang segment: {$lang}");
+            }
+            $lang = strtolower($lang);
+        }
+        return ['route' => $route, 'template' => $template, 'lang' => $lang];
     }
 
     /**
-     * Prevent path traversal. Route segments must not contain '..' and must
-     * be composed of safe characters. We also collapse leading/trailing
-     * slashes.
+     * Route is hashed before it touches the filesystem, so traversal is not
+     * possible — but we still validate to keep room ids well-formed and
+     * reject obvious garbage.
      */
-    private function sanitizeRoute(string $route): string
+    private function validateRoute(string $route): void
     {
         $route = trim($route, "/ \t\n\r\0\x0B");
         if ($route === '') {
             throw new RuntimeException('sync: empty route');
         }
-        $segments = explode('/', $route);
-        $safe = [];
-        foreach ($segments as $seg) {
+        foreach (explode('/', $route) as $seg) {
             if ($seg === '' || $seg === '.' || $seg === '..') {
                 throw new RuntimeException("sync: unsafe route segment: {$seg}");
             }
             if (!preg_match('/^[a-z0-9._-]+$/i', $seg)) {
                 throw new RuntimeException("sync: invalid route segment: {$seg}");
             }
-            $safe[] = $seg;
-        }
-        return implode('/', $safe);
-    }
-
-    private function ensureDir(string $dir): void
-    {
-        if (is_dir($dir)) {
-            return;
-        }
-        if (!mkdir($dir, 0755, true) && !is_dir($dir)) {
-            throw new RuntimeException("sync: cannot create directory: {$dir}");
         }
     }
 }

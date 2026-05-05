@@ -18,30 +18,27 @@ use PHPUnit\Framework\TestCase;
 #[Group('concurrency')]
 final class ConcurrentAppendTest extends TestCase
 {
-    private string $pagesRoot;
+    private string $dataRoot;
 
     protected function setUp(): void
     {
         if (!function_exists('pcntl_fork')) {
             $this->markTestSkipped('pcntl not available');
         }
-        $this->pagesRoot = sys_get_temp_dir() . '/sync-concur-' . bin2hex(random_bytes(4));
-        mkdir($this->pagesRoot, 0755, true);
+        $this->dataRoot = sys_get_temp_dir() . '/sync-concur-' . bin2hex(random_bytes(4));
+        mkdir($this->dataRoot, 0755, true);
     }
 
     protected function tearDown(): void
     {
-        if (isset($this->pagesRoot) && is_dir($this->pagesRoot)) {
-            foreach (glob($this->pagesRoot . '/*/.sync/*') ?: [] as $f) {
+        if (isset($this->dataRoot) && is_dir($this->dataRoot)) {
+            foreach (glob($this->dataRoot . '/*/*') ?: [] as $f) {
                 @unlink($f);
             }
-            foreach (glob($this->pagesRoot . '/*/.sync') ?: [] as $d) {
+            foreach (glob($this->dataRoot . '/*') ?: [] as $d) {
                 @rmdir($d);
             }
-            foreach (glob($this->pagesRoot . '/*') ?: [] as $d) {
-                @rmdir($d);
-            }
-            @rmdir($this->pagesRoot);
+            @rmdir($this->dataRoot);
         }
     }
 
@@ -60,7 +57,7 @@ final class ConcurrentAppendTest extends TestCase
             }
             if ($pid === 0) {
                 // Child process.
-                $storage = new FileSyncStorage($this->pagesRoot);
+                $storage = new FileSyncStorage($this->dataRoot);
                 for ($i = 0; $i < $updatesPerWorker; $i++) {
                     $payload = sprintf('w%02d-i%02d-%s', $w, $i, str_repeat('x', 16));
                     $storage->appendUpdate($room, $payload, "w{$w}");
@@ -79,7 +76,7 @@ final class ConcurrentAppendTest extends TestCase
             $this->assertSame(0, pcntl_wexitstatus($status), 'worker exited non-zero');
         }
 
-        $storage = new FileSyncStorage($this->pagesRoot);
+        $storage = new FileSyncStorage($this->dataRoot);
         $res = $storage->getUpdatesSince($room, 0);
 
         $this->assertCount($workers * $updatesPerWorker, $res['updates']);

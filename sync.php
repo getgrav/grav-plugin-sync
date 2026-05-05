@@ -51,7 +51,12 @@ class SyncPlugin extends Plugin
         $this->grav['sync_storage'] = function (): SyncStorage {
             $adapter = $this->config->get('plugins.sync.storage.adapter', 'file');
             if ($adapter === 'file') {
-                $root = rtrim(GRAV_ROOT, '/') . '/user/pages';
+                // Sync data lives outside user/pages so room storage never
+                // shows up as extra "pages" in admin. Routes are hashed
+                // before they hit the filesystem, so language/numeric-prefix
+                // mismatches with the actual page folder layout don't
+                // matter.
+                $root = rtrim(GRAV_ROOT, '/') . '/user/data/sync';
                 return new FileSyncStorage($root);
             }
             throw new \RuntimeException("sync: unsupported storage adapter '{$adapter}'");
