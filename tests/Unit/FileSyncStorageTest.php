@@ -10,17 +10,17 @@ use RuntimeException;
 
 final class FileSyncStorageTest extends TestCase
 {
-    private string $pagesRoot;
+    private string $dataRoot;
 
     protected function setUp(): void
     {
-        $this->pagesRoot = sys_get_temp_dir() . '/sync-test-' . bin2hex(random_bytes(4));
-        mkdir($this->pagesRoot, 0755, true);
+        $this->dataRoot = sys_get_temp_dir() . '/sync-test-' . bin2hex(random_bytes(4));
+        mkdir($this->dataRoot, 0755, true);
     }
 
     protected function tearDown(): void
     {
-        $this->rrm($this->pagesRoot);
+        $this->rrm($this->dataRoot);
     }
 
     private function rrm(string $dir): void
@@ -44,7 +44,12 @@ final class FileSyncStorageTest extends TestCase
 
     private function storage(): FileSyncStorage
     {
-        return new FileSyncStorage($this->pagesRoot);
+        return new FileSyncStorage($this->dataRoot);
+    }
+
+    private function roomDir(string $route): string
+    {
+        return $this->dataRoot . '/' . md5($route);
     }
 
     // ------------------------------------------------------------------
@@ -119,7 +124,7 @@ final class FileSyncStorageTest extends TestCase
 
     public function test_refuses_oversized_update(): void
     {
-        $s = new FileSyncStorage($this->pagesRoot, maxUpdateBytes: 100);
+        $s = new FileSyncStorage($this->dataRoot, maxUpdateBytes: 100);
         $this->expectException(RuntimeException::class);
         $s->appendUpdate('foo@default', str_repeat('x', 101));
     }
@@ -191,21 +196,41 @@ final class FileSyncStorageTest extends TestCase
         $s->appendUpdate('foo/bar with spaces@default', 'payload');
     }
 
-    public function test_default_template_when_no_at(): void
+    public function test_malformed_room_id_rejected(): void
     {
         $s = $this->storage();
+        $this->expectException(RuntimeException::class);
+        // No template segment.
         $s->appendUpdate('plain-route', 'hi');
-        $this->assertFileExists($this->pagesRoot . '/plain-route/.sync/default.log');
+    }
+
+    public function test_writes_to_hashed_dir(): void
+    {
+        $s = $this->storage();
+        $s->appendUpdate('plain-route@default', 'hi');
+        $this->assertFileExists($this->roomDir('plain-route') . '/default.log');
+    }
+
+    public function test_meta_json_records_route(): void
+    {
+        $s = $this->storage();
+        $s->appendUpdate('blog/hello@default', 'hi');
+        $meta = json_decode((string)file_get_contents($this->roomDir('blog/hello') . '/meta.json'), true);
+        $this->assertSame('blog/hello', $meta['route'] ?? null);
+        $this->assertGreaterThan(0, $meta['createdAt'] ?? 0);
     }
 
     public function test_language_aware_room(): void
     {
         $s = $this->storage();
-        $s->appendUpdate('blog/hello.fr@default', 'french');
+        // Same route, different langs — share a folder, separate logs.
+        $s->appendUpdate('blog/hello@default@fr', 'french');
         $s->appendUpdate('blog/hello@default', 'english');
-        // Both live in the same folder but under different ids.
-        $this->assertFileExists($this->pagesRoot . '/blog/hello.fr/.sync/default.log');
-        $this->assertFileExists($this->pagesRoot . '/blog/hello/.sync/default.log');
+        $dir = $this->roomDir('blog/hello');
+        $this->assertFileExists($dir . '/default.fr.log');
+        $this->assertFileExists($dir . '/default.log');
+        $this->assertSame(['french'], $s->getUpdatesSince('blog/hello@default@fr', 0)['updates']);
+        $this->assertSame(['english'], $s->getUpdatesSince('blog/hello@default', 0)['updates']);
     }
 
     public function test_snapshot_round_trip(): void
@@ -232,7 +257,7 @@ final class FileSyncStorageTest extends TestCase
         $this->assertSame('v2', $loaded['snapshot']);
         $this->assertSame('sv2', $loaded['stateVector']);
         // No stale .tmp files left behind
-        $tmps = glob($this->pagesRoot . '/foo/.sync/*.tmp.*');
+        $tmps = glob($this->roomDir('foo') . '/*.tmp.*');
         $this->assertEmpty($tmps);
     }
 
@@ -303,7 +328,7 @@ final class FileSyncStorageTest extends TestCase
         $room = 'foo@default';
         $s->appendUpdate($room, 'AAAA');
         // Append garbage (no length header).
-        $log = $this->pagesRoot . '/foo/.sync/default.log';
+        $log = $this->roomDir('foo') . '/default.log';
         file_put_contents($log, 'XY', FILE_APPEND);
         $res = $s->getUpdatesSince($room, 0);
         // First update is still parseable; trailing garbage is ignored.

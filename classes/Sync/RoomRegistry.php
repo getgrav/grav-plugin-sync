@@ -11,11 +11,13 @@ use RuntimeException;
  * Resolves page routes (+ language + template) into canonical room ids.
  *
  * A room id encodes enough to route storage deterministically:
- *   "<route>@<template>"                        — default language
- *   "<route>.<lang>@<template>"                 — explicit language
+ *   "<route>@<template>"            — default language
+ *   "<route>@<template>@<lang>"     — explicit language
  *
- * The route portion is the page folder path under user/pages, without the
- * numeric ordering prefix (e.g. `blog/my-post` not `01.blog/03.my-post`).
+ * Route is the public Grav route (no numeric ordering prefix). Storage
+ * never uses route as a literal filesystem path — it hashes route into
+ * a digest under user/data/sync — so `.lang` is kept as a separate
+ * segment of the id rather than smuggled into the route itself.
  * Template defaults to `default` when the blueprint name isn't relevant.
  */
 final class RoomRegistry
@@ -43,13 +45,15 @@ final class RoomRegistry
             throw new RuntimeException("sync: invalid template name: {$template}");
         }
 
-        $routePart = $normalized . ($lang ? '.' . strtolower($lang) : '');
-        $id = $routePart . '@' . $template;
+        $id = $normalized . '@' . $template;
+        if ($lang) {
+            $id .= '@' . strtolower($lang);
+        }
 
         return new SyncRoom(
             id: $id,
             route: $normalized,
-            language: $lang,
+            language: $lang ? strtolower($lang) : null,
             template: $template,
         );
     }
@@ -74,20 +78,21 @@ final class RoomRegistry
      */
     public function parse(string $roomId): array
     {
-        $at = strrpos($roomId, '@');
-        if ($at === false) {
+        $parts = explode('@', $roomId);
+        if (count($parts) < 2 || count($parts) > 3) {
             throw new RuntimeException('sync: malformed room id');
         }
-        $routePart = substr($roomId, 0, $at);
-        $template = substr($roomId, $at + 1);
-
-        // Split off trailing .<lang> if present.
-        $lang = null;
-        if (preg_match('/^(.*)\.([a-z]{2}(?:-[a-z]{2})?)$/i', $routePart, $m)) {
-            $route = $m[1];
-            $lang = strtolower($m[2]);
-        } else {
-            $route = $routePart;
+        $route = $parts[0];
+        $template = $parts[1];
+        $lang = $parts[2] ?? null;
+        if ($route === '' || $template === '') {
+            throw new RuntimeException('sync: malformed room id');
+        }
+        if ($lang !== null) {
+            if ($lang === '' || !preg_match('/^[a-z]{2}(-[a-z]{2})?$/i', $lang)) {
+                throw new RuntimeException('sync: malformed room id');
+            }
+            $lang = strtolower($lang);
         }
         return ['route' => $route, 'language' => $lang, 'template' => $template];
     }

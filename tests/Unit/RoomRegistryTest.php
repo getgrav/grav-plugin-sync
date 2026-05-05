@@ -27,7 +27,7 @@ final class RoomRegistryTest extends TestCase
     public function test_with_language(): void
     {
         $room = $this->registry()->roomFor('/blog/hello', 'fr');
-        $this->assertSame('blog/hello.fr@default', $room->id);
+        $this->assertSame('blog/hello@default@fr', $room->id);
         $this->assertSame('fr', $room->language);
     }
 
@@ -40,13 +40,13 @@ final class RoomRegistryTest extends TestCase
     public function test_with_language_and_template(): void
     {
         $room = $this->registry()->roomFor('/blog/hello', 'es', 'item');
-        $this->assertSame('blog/hello.es@item', $room->id);
+        $this->assertSame('blog/hello@item@es', $room->id);
     }
 
     public function test_region_language(): void
     {
         $room = $this->registry()->roomFor('/blog/hello', 'pt-BR');
-        $this->assertSame('blog/hello.pt-br@default', $room->id);
+        $this->assertSame('blog/hello@default@pt-br', $room->id);
     }
 
     public function test_strips_surrounding_slashes(): void
