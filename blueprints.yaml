@@ -1,8 +1,8 @@
 name: Sync
 slug: sync
 type: plugin
-version: 1.0.1
-description: Real-time collaboration substrate for Grav. Stores Yjs CRDT updates and presence state for multi-user editing. Transport-agnostic; works with polling, Mercure, or WebSocket providers.
+version: 1.1.1
+description: Real-time collaboration substrate for Grav. Stores Yjs CRDT updates and presence state for multi-user editing. Transport-agnostic; works with polling, Mercure, or WebSocket providers. Runs on Grav 1.7 and 2.0; integrates with the api plugin when available.
 icon: rotate
 author:
   name: Team Grav
@@ -13,11 +13,10 @@ keywords: collaboration, yjs, crdt, realtime, sync
 bugs: https://github.com/getgrav/grav-plugin-sync/issues
 license: MIT
 compatibility:
-  grav: ['2.0']
+  grav: ['1.7', '2.0']
 
 dependencies:
-  - { name: grav, version: '>=2.0.0-beta.2' }
-  - { name: api, version: '>=1.0.0-beta.13' }
+  - { name: grav, version: '>=1.7.49' }
   - { name: login, version: '>=3.8.0' }
 
 form:
