@@ -37,21 +37,23 @@ final class PresenceStore
      */
     public function heartbeat(string $roomId, string $clientId, ?string $user = null, array $meta = []): void
     {
-        $map = $this->load($roomId);
-        $now = time();
-        $existing = $map[$clientId] ?? null;
-        $map[$clientId] = [
-            'user' => $user,
-            'meta' => $meta,
-            'expiresAt' => $now + $this->ttlSeconds,
-            'lastSeen' => $now,
-            // Preserve the original join timestamp across heartbeats so
-            // first-joiner-wins logic (e.g. editor-type lock on the
-            // client) can identify the canonical "owner" of a room
-            // independent of who happens to be heartbeating right now.
-            'joinedAt' => $existing['joinedAt'] ?? $now,
-        ];
-        $this->save($roomId, $map);
+        $this->withLock($roomId, function () use ($roomId, $clientId, $user, $meta): void {
+            $map = $this->load($roomId);
+            $now = time();
+            $existing = $map[$clientId] ?? null;
+            $map[$clientId] = [
+                'user' => $user,
+                'meta' => $meta,
+                'expiresAt' => $now + $this->ttlSeconds,
+                'lastSeen' => $now,
+                // Preserve the original join timestamp across heartbeats so
+                // first-joiner-wins logic (e.g. editor-type lock on the
+                // client) can identify the canonical "owner" of a room
+                // independent of who happens to be heartbeating right now.
+                'joinedAt' => $existing['joinedAt'] ?? $now,
+            ];
+            $this->save($roomId, $map);
+        });
     }
 
     /**
@@ -59,12 +61,14 @@ final class PresenceStore
      */
     public function leave(string $roomId, string $clientId): void
     {
-        $map = $this->load($roomId);
-        if (!isset($map[$clientId])) {
-            return;
-        }
-        unset($map[$clientId]);
-        $this->save($roomId, $map);
+        $this->withLock($roomId, function () use ($roomId, $clientId): void {
+            $map = $this->load($roomId);
+            if (!isset($map[$clientId])) {
+                return;
+            }
+            unset($map[$clientId]);
+            $this->save($roomId, $map);
+        });
     }
 
     /**
@@ -140,6 +144,47 @@ final class PresenceStore
     {
         // PSR-16 forbids certain chars in keys. hash to be safe.
         return 'sync.presence.' . sha1($roomId);
+    }
+
+    /**
+     * Run $fn under an exclusive flock keyed on the room. Without this,
+     * concurrent heartbeats from N peers do load-modify-save on the same
+     * cache key and the last writer's `save()` wipes the others' entries
+     * (each heartbeat reads its own pre-modify snapshot, mutates only its
+     * own clientId, then writes the whole map back). With three actively
+     * polling clients we observed each one's `peers()` response disagreeing
+     * about who was in the room. The lockfile is independent of the cache
+     * backend (file/apcu/redis), so this works everywhere.
+     *
+     * If the lockfile can't be opened or `flock()` fails, we fall back to
+     * the unsafe path rather than dropping the heartbeat — partial accuracy
+     * is better than a broken room.
+     */
+    private function withLock(string $roomId, callable $fn): void
+    {
+        $lockDir = rtrim(GRAV_ROOT, '/') . '/cache/sync/presence-locks';
+        if (!is_dir($lockDir)) {
+            @mkdir($lockDir, 0775, true);
+        }
+        $lockFile = $lockDir . '/' . sha1($roomId) . '.lock';
+        $fp = @fopen($lockFile, 'c');
+        if (!$fp) {
+            $fn();
+            return;
+        }
+        try {
+            if (@flock($fp, LOCK_EX)) {
+                try {
+                    $fn();
+                } finally {
+                    @flock($fp, LOCK_UN);
+                }
+            } else {
+                $fn();
+            }
+        } finally {
+            @fclose($fp);
+        }
     }
 
     /**

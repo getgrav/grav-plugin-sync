@@ -74,7 +74,25 @@ class SyncPlugin extends Plugin
         // based on whether the api plugin is loaded. See that method for
         // the rationale.
         return [
-            'onPluginsInitialized'        => [['onPluginsInitialized', 1000]],
+            // Two passes on onPluginsInitialized:
+            //   1000 — register container services (sync_storage, sync_channels,
+            //          sync_transports, the public sync facade) and pick the
+            //          HTTP entry path. Side-car plugins (sync-mercure,
+            //          sync-ably) also run their onPluginsInitialized at 1000,
+            //          where they register $grav['mercure'] and
+            //          $grav['sync_ably'] respectively.
+            //   100  — fire onSyncRegisterTransports / onSyncRegisterChannels.
+            //          By this priority every plugin's 1000-tier handler has
+            //          run, so side-cars' static onSyncRegisterTransports
+            //          listeners can resolve their services from the container
+            //          and actually register their transports. Firing these
+            //          events from inside the 1000-priority pass would race
+            //          alphabetical plugin order and silently leave the
+            //          registry empty for any side-car that sorts after sync.
+            'onPluginsInitialized'        => [
+                ['onPluginsInitialized', 1000],
+                ['onPluginsInitializedRegistration', 100],
+            ],
             PermissionsRegisterEvent::class => ['onRegisterPermissions', 1000],
             // Sync core's polling transport registers itself in the same
             // event consumer plugins use; priority 100 keeps it ahead of
@@ -141,19 +159,6 @@ class SyncPlugin extends Plugin
             );
         };
 
-        // Fire the registration events. Transports first so the channel
-        // facade has a populated transport registry by the time consumer
-        // plugins start wiring channels (some may want to peek at
-        // available transports during registration).
-        $this->grav->fireEvent('onSyncRegisterTransports', new Event([
-            'transports' => $this->grav['sync_transports'],
-            'sync' => $this->grav['sync'],
-        ]));
-        $this->grav->fireEvent('onSyncRegisterChannels', new Event([
-            'sync' => $this->grav['sync'],
-            'channels' => $this->grav['sync_channels'],
-        ]));
-
         // Wire the right HTTP entry path. We can't decide this in the
         // static getSubscribedEvents() because the api plugin may load
         // after static dispatch is built. enable() registers the handler
@@ -167,6 +172,32 @@ class SyncPlugin extends Plugin
                 'onPageInitialized' => ['onPageInitialized', 0],
             ]);
         }
+    }
+
+    /**
+     * Second-pass plugin init at priority 100. Runs after every plugin's
+     * priority-1000 onPluginsInitialized handler, so side-car services
+     * (e.g. $grav['mercure'], $grav['sync_ably']) are guaranteed to be
+     * in the container before we ask transports / channel owners to
+     * register themselves.
+     */
+    public function onPluginsInitializedRegistration(): void
+    {
+        if (!$this->config->get('plugins.sync.enabled')) {
+            return;
+        }
+
+        // Transports first so the channel facade has a populated transport
+        // registry by the time consumer plugins start wiring channels —
+        // some may peek at available transports during registration.
+        $this->grav->fireEvent('onSyncRegisterTransports', new Event([
+            'transports' => $this->grav['sync_transports'],
+            'sync' => $this->grav['sync'],
+        ]));
+        $this->grav->fireEvent('onSyncRegisterChannels', new Event([
+            'sync' => $this->grav['sync'],
+            'channels' => $this->grav['sync_channels'],
+        ]));
     }
 
     /**

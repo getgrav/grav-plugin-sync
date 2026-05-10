@@ -435,6 +435,13 @@ class SyncController extends AbstractSyncController
      * (they use the page-scoped /pull /push /init endpoints with their
      * own permission gating) so the lack of an auth callback here is
      * not a privilege escalation.
+     *
+     * Before the auto-register fallback runs, fire `onSyncBeforeCrdtChannelRegistered`
+     * so plugins can register the channel themselves with a real auth
+     * callback. Editor-pro listens and routes to its
+     * `EditorProPlugin::ensureSyncChannelRegistered()` helper, which
+     * gates the channel on `api.collab.*` + `api.pages.*`. If a listener
+     * registers the channel, the auto-register branch below short-circuits.
      */
     private function ensureCrdtChannel(SyncRoom $room): void
     {
@@ -443,6 +450,16 @@ class SyncController extends AbstractSyncController
         if ($sync->getChannel($channelId) !== null) {
             return;
         }
+
+        $this->grav->fireEvent('onSyncBeforeCrdtChannelRegistered', new \RocketTheme\Toolbox\Event\Event([
+            'channelId' => $channelId,
+            'room' => $room,
+            'sync' => $sync,
+        ]));
+        if ($sync->getChannel($channelId) !== null) {
+            return;
+        }
+
         $sync->registerChannel(new Channel(
             id: $channelId,
             ownerPlugin: 'editor-pro',
