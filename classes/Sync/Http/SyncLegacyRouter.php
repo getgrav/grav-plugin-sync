@@ -36,11 +36,12 @@ final class SyncLegacyRouter
             $this->compile('POST', '/sync/pages/{route}/pull',             'pull',           ['route']),
             $this->compile('POST', '/sync/pages/{route}/push',             'push',           ['route']),
             $this->compile('POST', '/sync/pages/{route}/presence',         'presence',       ['route']),
-            // Channel-scoped pub/sub endpoints (Round 3). The {id}
-            // placeholder absorbs the entire remaining path so colons,
-            // slashes, and @-signs in channel ids pass through verbatim.
-            $this->compile('GET',  '/sync/channels/{id}/pull',             'channelPull',    ['id']),
-            $this->compile('POST', '/sync/channels/{id}/publish',          'channelPublish', ['id']),
+            // Channel-scoped pub/sub endpoints. The channel id rides in
+            // the query string (`?id=...`) because Grav's URI parser
+            // strips `:`-bearing path segments as URI params and channel
+            // ids legitimately contain colons.
+            $this->compile('GET',  '/sync/channels/pull',                  'channelPull',    []),
+            $this->compile('POST', '/sync/channels/publish',               'channelPublish', []),
         ];
     }
 

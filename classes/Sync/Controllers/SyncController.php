@@ -477,8 +477,18 @@ class SyncController extends AbstractSyncController
 
     private function requireChannelId(ServerRequestInterface $request): string
     {
-        $id = $this->getRouteParam($request, 'id');
-        if ($id === null || $id === '') {
+        // Channel id lives in the query string — see the channel route
+        // definitions for why it's not a path segment. Fall back to the
+        // legacy `route_params['id']` so any caller still using the old
+        // `/sync/channels/{id}/...` shape keeps working.
+        $params = $request->getQueryParams();
+        $id = isset($params['id']) ? (string)$params['id'] : '';
+
+        if ($id === '') {
+            $id = (string)($this->getRouteParam($request, 'id') ?? '');
+        }
+
+        if ($id === '') {
             throw new ValidationException('Channel id required.');
         }
         return $id;
@@ -486,7 +496,22 @@ class SyncController extends AbstractSyncController
 
     private function requireChannel(string $channelId): Channel
     {
-        $channel = $this->sync()->getChannel($channelId);
+        $sync = $this->sync();
+        $channel = $sync->getChannel($channelId);
+
+        if ($channel === null) {
+            // Lazy-registration hook: consumer plugins (comments-pro, etc.)
+            // typically register their channels on first publish from their
+            // own request lifecycle. A sync pull/publish request doesn't
+            // run that code path, so fire an event giving owner plugins
+            // one last chance to register before we 404.
+            $this->grav->fireEvent('onSyncResolveChannel', new \RocketTheme\Toolbox\Event\Event([
+                'channelId' => $channelId,
+                'sync' => $sync,
+            ]));
+            $channel = $sync->getChannel($channelId);
+        }
+
         if ($channel === null) {
             throw new NotFoundException("Channel not found: {$channelId}");
         }

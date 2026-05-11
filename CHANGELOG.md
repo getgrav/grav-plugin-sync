@@ -9,13 +9,16 @@
     * Transport-provider registry. External plugins (Mercure, Ably) plug in via the new `onSyncRegisterTransports` event. Built-in polling stays as the universal fallback.
     * Per-channel auth delegation via callback or the new `onSyncCheckAccess` event.
     * New `onSyncBeforeCrdtChannelRegistered` event so plugins can attach proper permission gating to a page's CRDT channel before sync falls back to its permissive auto-register.
-    * New endpoints `/sync/channels/{id}/pull` and `/sync/channels/{id}/publish` for the broadcast pub/sub model. Available under both the api-plugin route prefix and the legacy `/sync/*` dispatcher.
+    * New endpoints `GET /sync/channels/pull?id=<channelId>` and `POST /sync/channels/publish?id=<channelId>` for the broadcast pub/sub model. Available under both the api-plugin route prefix and the legacy `/sync/*` dispatcher. The channel id rides in the query string (not a path segment) so colons in ids — common, e.g. `comments-pro:blog/post-1` — are not eaten by Grav's URI param parser.
+    * New `onSyncResolveChannel` event. Fired by the pull/publish handler when an incoming request names a channel the in-process registry hasn't seen yet, giving owner plugins one last chance to lazy-register before sync 404s.
     * Legacy `/sync/*` HTTP path now uses the api plugin's full auth chain (X-API-Token, Authorization Bearer) when api is loaded, in addition to session auth. The mutex with `/api/v1/sync/*` is unchanged; this enables forward-compat for sites that choose to expose both prefixes.
 2. [](#improved)
     * Capabilities response now lists every registered transport with id, name, priority, and supported message types, plus a `preferred` field. The existing `polling` and `presence` sub-blocks are unchanged.
 3. [](#bugfix)
     * Transport plugins (Mercure, Ably) now reliably land in the transport registry — previously they could register too late and only appear in the capabilities response as a stub entry.
     * Presence room membership is no longer corrupted when three or more peers heartbeat at once. Three browsers editing the same page used to each see a different subset of peers (one would even see only itself) because concurrent load-modify-save writes on the shared presence cache key clobbered each other; an exclusive flock around the heartbeat critical section keeps every peer's entry intact.
+    * Polling transport's pull/publish URLs now honor Grav's base path, and route through the api plugin's prefix when api is loaded — fixes 404s on Grav installs mounted at a subpath.
+    * Legacy `/sync/*` dispatcher now matches correctly on subpath installs (it stripped the wrong portion of the path before checking the `/sync/` prefix).
 4. [](#note)
     * The CRDT path used by editor-pro is unchanged. All existing endpoints, events (`onSyncUpdate`, `onSyncAwareness`, `onSyncCapabilities`), and storage layouts remain compatible.
 

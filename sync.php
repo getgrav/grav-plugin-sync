@@ -254,13 +254,14 @@ class SyncPlugin extends Plugin
             $r->post('/presence', [SyncController::class, 'presence']);
         });
 
-        // Channel-scoped pub/sub endpoints. Channel ids may include
-        // colons, slashes, and @-signs; the {id:.+} pattern absorbs the
-        // remainder of the URL so the api router doesn't try to split it.
-        $routes->group('/sync/channels/{id:.+}', function ($r): void {
-            $r->get('/pull',     [SyncController::class, 'channelPull']);
-            $r->post('/publish', [SyncController::class, 'channelPublish']);
-        });
+        // Channel-scoped pub/sub endpoints. The channel id rides in the
+        // query string (`?id=...`) rather than as a path segment, because
+        // Grav's URI parser eats `:`-bearing path segments as URI params
+        // (`system.param_sep` defaults to `:`), and channel ids legitimately
+        // contain colons (e.g. `comments-pro:blog/post-1`). Keeping the id
+        // off the path side-steps that entirely.
+        $routes->get('/sync/channels/pull',     [SyncController::class, 'channelPull']);
+        $routes->post('/sync/channels/publish', [SyncController::class, 'channelPublish']);
     }
 
     /**
@@ -278,7 +279,19 @@ class SyncPlugin extends Plugin
         /** @var Uri $uri */
         $uri = $this->grav['uri'];
         $path = $uri->path();
-        if (!is_string($path) || !str_starts_with($path, '/sync/')) {
+        if (!is_string($path)) {
+            return;
+        }
+
+        // On subpath installs (e.g. /sync-testing/grav-c) $uri->path() may
+        // include the base; strip it before checking the /sync/ prefix so
+        // the legacy router doesn't silently bail.
+        $base = rtrim((string)$uri->rootUrl(false), '/');
+        if ($base !== '' && str_starts_with($path, $base)) {
+            $path = substr($path, strlen($base));
+        }
+
+        if (!str_starts_with($path, '/sync/')) {
             return;
         }
 

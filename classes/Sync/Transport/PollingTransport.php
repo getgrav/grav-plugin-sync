@@ -116,11 +116,32 @@ final class PollingTransport implements TransportInterface
         $idle = (int)$config->get('plugins.sync.polling.idle_interval_ms', 4000);
         $active = (int)$config->get('plugins.sync.polling.active_interval_ms', 1000);
 
+        // Prefix Grav's base path so installs mounted at a subpath
+        // (e.g. /sync-testing/grav-c) resolve correctly.
+        $base = rtrim((string)$this->grav['uri']->rootUrl(false), '/');
+
+        // When the api plugin is loaded sync wires `onApiRegisterRoutes`
+        // *instead of* the legacy `onPageInitialized` (see sync.php), so
+        // the only reachable endpoints sit under the api prefix. Match
+        // that here or the polling client 404s.
+        $prefix = '/sync';
+        if (class_exists(\Grav\Plugin\Api\ApiRouteCollector::class)) {
+            $apiRoute = rtrim((string)$config->get('plugins.api.route', '/api'), '/');
+            $apiVersion = trim((string)$config->get('plugins.api.version_prefix', 'v1'), '/');
+            $prefix = $apiRoute . ($apiVersion !== '' ? '/' . $apiVersion : '') . '/sync';
+        }
+
+        // The channel id rides in the query string instead of the URL
+        // path. Grav's URI parser otherwise eats `:`-bearing path segments
+        // as URI params (`system.param_sep` defaults to `:`), and channel
+        // ids legitimately contain colons.
+        $idQuery = '?id=' . rawurlencode($channel->id);
+
         return [
             'transport' => 'polling',
             'channel' => $channel->id,
-            'pullUrl' => '/sync/channels/' . rawurlencode($channel->id) . '/pull',
-            'publishUrl' => '/sync/channels/' . rawurlencode($channel->id) . '/publish',
+            'pullUrl' => $base . $prefix . '/channels/pull' . $idQuery,
+            'publishUrl' => $base . $prefix . '/channels/publish' . $idQuery,
             'idleIntervalMs' => $idle,
             'activeIntervalMs' => $active,
         ];
