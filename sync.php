@@ -17,6 +17,7 @@ use Grav\Plugin\Sync\RoomRegistry;
 use Grav\Plugin\Sync\Storage\BroadcastStorage;
 use Grav\Plugin\Sync\Storage\FileBroadcastStorage;
 use Grav\Plugin\Sync\Storage\FileSyncStorage;
+use Grav\Plugin\Sync\Storage\SqliteSyncStorage;
 use Grav\Plugin\Sync\Sync;
 use Grav\Plugin\Sync\SyncStorage;
 use Grav\Plugin\Sync\Transport\PollingTransport;
@@ -114,16 +115,34 @@ class SyncPlugin extends Plugin
         }
 
         $this->grav['sync_storage'] = function (): SyncStorage {
-            $adapter = $this->config->get('plugins.sync.storage.adapter', 'file');
+            // 'auto' (the default) prefers sqlite when the pdo_sqlite
+            // extension is available and falls back to the file backend
+            // otherwise. Explicit 'sqlite' or 'file' overrides the choice.
+            $adapter = (string)$this->config->get('plugins.sync.storage.adapter', 'auto');
+            if ($adapter === 'auto') {
+                $adapter = extension_loaded('pdo_sqlite') ? 'sqlite' : 'file';
+            }
+
+            $base = rtrim(GRAV_ROOT, '/') . '/user/data/sync';
+
+            if ($adapter === 'sqlite') {
+                if (!extension_loaded('pdo_sqlite')) {
+                    throw new \RuntimeException(
+                        "sync: storage.adapter='sqlite' but the pdo_sqlite PHP extension is not loaded"
+                    );
+                }
+                return new SqliteSyncStorage($base . '/storage');
+            }
+
             if ($adapter === 'file') {
                 // Sync data lives outside user/pages so room storage never
                 // shows up as extra "pages" in admin. Routes are hashed
                 // before they hit the filesystem, so language/numeric-prefix
                 // mismatches with the actual page folder layout don't
                 // matter.
-                $root = rtrim(GRAV_ROOT, '/') . '/user/data/sync';
-                return new FileSyncStorage($root);
+                return new FileSyncStorage($base);
             }
+
             throw new \RuntimeException("sync: unsupported storage adapter '{$adapter}'");
         };
 

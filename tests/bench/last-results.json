@@ -1,0 +1,82 @@
+{
+    "config": {
+        "quick": false,
+        "runs": 3,
+        "php_version": "8.3.30",
+        "pdo_sqlite": "8.3.30",
+        "sqlite_lib": "3.53.0",
+        "sapi": "cli",
+        "os": "Darwin"
+    },
+    "sizes": {
+        "seq_appends": 2000,
+        "pull_iters": 100,
+        "incr_appends": 1000,
+        "incr_pull_every": 5,
+        "concurrent_workers": 8,
+        "concurrent_per": 200,
+        "reader_count": 4,
+        "reader_writer_ops": 800,
+        "snapshot_iters": 200,
+        "snapshot_bytes": 65536,
+        "update_bytes": 200
+    },
+    "results": {
+        "seq_append": {
+            "name": "Sequential append, single writer",
+            "ops": 2000,
+            "file_seconds": 0.050378917,
+            "sqlite_seconds": 0.028552584,
+            "file_ops_per_sec": 39699.14637109011,
+            "sqlite_ops_per_sec": 70046.19967145531
+        },
+        "seq_pull": {
+            "name": "Pull-all (full log scan)",
+            "ops": 100,
+            "file_seconds": 0.121771459,
+            "sqlite_seconds": 0.091924333,
+            "file_ops_per_sec": 821.21049399597,
+            "sqlite_ops_per_sec": 1087.8512439138394
+        },
+        "incremental": {
+            "name": "Incremental pull (polling-shaped)",
+            "ops": 1000,
+            "file_seconds": 0.028475625,
+            "sqlite_seconds": 0.017995875,
+            "file_ops_per_sec": 35117.75421961765,
+            "sqlite_ops_per_sec": 55568.28995533698
+        },
+        "concurrent_same": {
+            "name": "Concurrent append, same room (8 workers)",
+            "ops": 1600,
+            "file_seconds": 0.031595083,
+            "sqlite_seconds": 0.079401625,
+            "file_ops_per_sec": 50640.79116361238,
+            "sqlite_ops_per_sec": 20150.721096702993
+        },
+        "concurrent_diff": {
+            "name": "Concurrent append, separate rooms (8 workers)",
+            "ops": 1600,
+            "file_seconds": 0.034900125,
+            "sqlite_seconds": 0.03551325,
+            "file_ops_per_sec": 45845.108004627495,
+            "sqlite_ops_per_sec": 45053.60675240931
+        },
+        "reader_writer": {
+            "name": "1 writer + 4 readers polling",
+            "ops": 800,
+            "file_seconds": 0.039473,
+            "sqlite_seconds": 0.044749167,
+            "file_ops_per_sec": 20267.01796164467,
+            "sqlite_ops_per_sec": 17877.42775189536
+        },
+        "snapshot": {
+            "name": "Snapshot write+read cycle",
+            "ops": 400,
+            "file_seconds": 0.034639375,
+            "sqlite_seconds": 0.004760542,
+            "file_ops_per_sec": 11547.552460169965,
+            "sqlite_ops_per_sec": 84024.04600148469
+        }
+    }
+}

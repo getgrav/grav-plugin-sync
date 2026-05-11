@@ -1,7 +1,9 @@
-# v1.1.1
-## 05/10/2026
+# v1.2.0
+## 05/11/2026
 
 1. [](#new)
+    * New SQLite storage backend for Yjs update logs and snapshots. One database per room under `user/data/sync/storage/`, with WAL mode and writer-locked transactions — eliminates the file-lock contention the file backend can hit under heavy multi-user editing.
+    * `storage.adapter` defaults to `auto`, which picks SQLite when the `pdo_sqlite` PHP extension is available and falls back to the file backend otherwise. Existing installs that have `adapter: file` saved keep using file storage.
     * Public pub/sub facade `$grav['sync']`. Plugins can register channels and publish messages without coupling to a specific transport.
     * Three message types: `crdt` (Yjs binary updates), `broadcast` (arbitrary payload with optional TTL replay), `awareness` (ephemeral presence).
     * Transport-provider registry. External plugins (Mercure, Ably) plug in via the new `onSyncRegisterTransports` event. Built-in polling stays as the universal fallback.

@@ -1,7 +1,7 @@
 enabled: true
 
 storage:
-  adapter: file
+  adapter: auto
 
 squash:
   idle_seconds: 60

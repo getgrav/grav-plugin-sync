@@ -287,7 +287,7 @@ Defaults live in `sync.yaml`; override in `user/config/plugins/sync.yaml`:
 enabled: true
 
 storage:
-  adapter: file        # file | sqlite (sqlite requires the database plugin)
+  adapter: auto        # auto | file | sqlite — auto prefers sqlite when pdo_sqlite is available
 
 squash:
   idle_seconds: 60     # squash after this much room inactivity
@@ -314,7 +314,18 @@ Defined in `permissions.yaml` and registered with Grav's ACL:
 
 Normal page ACL is also enforced (`api.pages.read` for pulls, `api.pages.write` for pushes), so collaboration cannot escalate beyond what the user can already do via the page API. Channel-scoped pub/sub endpoints additionally consult `Sync::checkAccess()` so consumer plugins enforce their own per-channel rules.
 
-## Storage layout (file adapter)
+## Storage backends
+
+Sync ships with two interchangeable CRDT storage adapters and an `auto` mode (the default) that picks between them. Both implement the same `SyncStorage` interface and use the same opaque cursor format, so the choice is transparent to clients.
+
+| Adapter | When picked by `auto` | Requires | Layout |
+|---------|----------------------|----------|--------|
+| `sqlite` | When the `pdo_sqlite` PHP extension is loaded | `pdo_sqlite` (built into most PHP distros) | One database per room |
+| `file`   | When `pdo_sqlite` is missing | Nothing beyond the filesystem | One append-only log file per room |
+
+Pick `file` or `sqlite` explicitly in `sync.yaml` to override the auto choice. Existing installs that already have `adapter: file` saved keep using file storage; only fresh installs default to `auto`.
+
+### File adapter layout
 
 Per-room CRDT logs and snapshots live under `user/data/sync/`, keyed by a hash of the page route. Sync data never lands inside `user/pages/`.
 
@@ -330,6 +341,47 @@ user/data/sync/
 ```
 
 Concurrency is handled with `flock(LOCK_EX)` for appends and `LOCK_SH` for reads. Snapshot writes use rename-swap for atomicity. Room ids and channel ids are sanitized before path resolution so a malicious id cannot escape the sync data root.
+
+### SQLite adapter layout
+
+The SQLite adapter mirrors the file layout — one directory per room, under a hash of the route — but stores Yjs updates and snapshots inside a per-room SQLite database under `user/data/sync/storage/` instead of separate log/state files.
+
+```
+user/data/sync/
+├── storage/
+│   └── <md5(route)>/
+│       ├── meta.json       # route + template + lang reverse lookup
+│       ├── default.sqlite  # WAL-mode db: updates + snapshot tables
+│       └── default.fr.sqlite
+└── broadcast/
+    └── <channel-id-hash>/...   # broadcast TTL ring buffers (file adapter)
+```
+
+Each database runs in WAL mode with `synchronous=NORMAL` and `busy_timeout=5000`. Appends and the empty-room seed both grab the writer lock up front via `BEGIN IMMEDIATE` so concurrent writers serialize cleanly rather than racing on a deferred BEGIN. Snapshot writes are an atomic `INSERT … ON CONFLICT … DO UPDATE`, no rename-swap required.
+
+The cursor returned to clients is the cumulative virtual byte position of the row (`prev_size + 4 + len(update)`) — identical to the file adapter's on-disk byte offset, so the opaque pull cursor is portable between backends and `squash.max_log_bytes` thresholds behave identically.
+
+### Performance
+
+Both adapters are fast enough that real-world collab traffic (a handful of writes/sec per room) won't notice the difference. The numbers below are from the in-tree microbench (`tests/bench/storage_bench.php`) on an Apple Silicon Mac running PHP 8.3 + SQLite 3.53, median of 3 runs:
+
+| Scenario                                                    | File ops/s | SQLite ops/s | Ratio (SQLite ÷ File) |
+|-------------------------------------------------------------|------------|--------------|-----------------------|
+| Sequential append, single writer                            |   39.7k    |   70.0k      | **1.76×**             |
+| Pull-all (full log scan, 2000 updates)                      |   821      |   1,088      | **1.32×**             |
+| Incremental pull (polling-shaped, 1 pull per 5 appends)     |   35.1k    |   55.6k      | **1.58×**             |
+| Concurrent append, 8 workers, same room                     |   49.2k    |   15.3k      | 0.31×                 |
+| Concurrent append, 8 workers, separate rooms                |   46.1k    |   41.5k      | 0.90×                 |
+| 1 writer + 4 readers polling, same room                     |   20.3k    |   18.3k      | 0.90×                 |
+| Snapshot write+read cycle                                   |   10.8k    |   84.2k      | **7.77×**             |
+
+Read this honestly:
+
+- **Most paths favour SQLite.** Single-writer append, incremental pulls, full reads, and especially snapshot writes are faster on SQLite. Snapshots are the most expensive code path in the squash flow, and the 7.77× gain there is the biggest win.
+- **SQLite is slower on heavy same-room concurrent writes.** Eight processes hammering one room with 200-byte updates pay SQLite's `synchronous=NORMAL` fsync-per-commit cost; the file adapter's `fflush` (no fsync) is cheaper but also weaker durability — a kernel panic mid-write can lose recent updates the file adapter has acknowledged. Real collab traffic doesn't approach this contention level (typical rooms have 2-3 active editors at single-digit writes/sec); the bench scenario is a worst-case stress test, not a representative workload.
+- **The actual motivation for SQLite isn't raw throughput.** It's robustness: `flock` on NFS / Docker bind mounts / MAMP-style FastCGI can fail silently, and `fflush`-only writes can be lost on host crash. SQLite WAL gives you a durable, crash-safe write log with no filesystem-specific failure modes.
+
+Run the bench yourself with `php tests/bench/storage_bench.php` (add `--quick` for a fast run, `--json` for machine-readable output).
 
 ## Room ids
 
