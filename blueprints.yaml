@@ -33,6 +33,21 @@ form:
       validate:
         type: bool
 
+    section_transports:
+      type: section
+      title: Transports
+      underline: true
+
+    transport_preference:
+      type: array
+      label: Transport Preference Order
+      help: Drag rows to reorder. The first available transport in the list handles live delivery; later rows serve as fallbacks. Only transports installed in this Grav instance appear in the dropdown — leave empty to fall back to each transport's built-in priority.
+      value_only: true
+      create: false
+      data-options@: '\Grav\Plugin\Sync\Transport\TransportRegistry::availableTransports'
+      validate:
+        type: array
+
     section_storage:
       type: section
       title: Storage
