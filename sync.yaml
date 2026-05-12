@@ -1,9 +1,13 @@
 enabled: true
 
-# transport_preference: configured in the admin. When empty, sync falls back
-# to each transport's built-in priority() value (Mercure 50, Ably 40,
-# polling 0) so behaviour matches pre-2026 installs out of the box.
-transport_preference: []
+# transport_preference: configured in the admin. Ids that aren't currently
+# installed (e.g. 'ably' on a site without sync-ably) are ignored at
+# selection time, so this default is safe to ship even when not all
+# transports are present.
+transport_preference:
+  - ably
+  - mercure
+  - polling
 
 storage:
   adapter: auto
