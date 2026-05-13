@@ -1,5 +1,5 @@
-# v1.2.0
-## 05/11/2026
+# v1.1.0
+## 05/13/2026
 
 1. [](#new)
     * New `Transport Preference Order` setting in the Sync admin. Reorder which installed transport handles live delivery (e.g. put Ably above Mercure) without uninstalling plugins. The dropdown is populated from transports currently registered in this instance, so deployers only see options they actually have.
