@@ -1,7 +1,16 @@
 enabled: true
 
+# transport_preference: configured in the admin. Ids that aren't currently
+# installed (e.g. 'ably' on a site without sync-ably) are ignored at
+# selection time, so this default is safe to ship even when not all
+# transports are present.
+transport_preference:
+  - ably
+  - mercure
+  - polling
+
 storage:
-  adapter: file
+  adapter: auto
 
 squash:
   idle_seconds: 60

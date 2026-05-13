@@ -1,8 +1,8 @@
 name: Sync
 slug: sync
 type: plugin
-version: 1.0.1
-description: Real-time collaboration substrate for Grav. Stores Yjs CRDT updates and presence state for multi-user editing. Transport-agnostic; works with polling, Mercure, or WebSocket providers.
+version: 1.1.0
+description: Real-time collaboration substrate for Grav. Stores Yjs CRDT updates and presence state for multi-user editing. Transport-agnostic; works with polling, Mercure, or WebSocket providers. Runs on Grav 1.7 and 2.0; integrates with the api plugin when available.
 icon: rotate
 author:
   name: Team Grav
@@ -13,11 +13,10 @@ keywords: collaboration, yjs, crdt, realtime, sync
 bugs: https://github.com/getgrav/grav-plugin-sync/issues
 license: MIT
 compatibility:
-  grav: ['2.0']
+  grav: ['1.7', '2.0']
 
 dependencies:
-  - { name: grav, version: '>=2.0.0-beta.2' }
-  - { name: api, version: '>=1.0.0-beta.13' }
+  - { name: grav, version: '>=1.7.49' }
   - { name: login, version: '>=3.8.0' }
 
 form:
@@ -34,6 +33,21 @@ form:
       validate:
         type: bool
 
+    section_transports:
+      type: section
+      title: Transports
+      underline: true
+
+    transport_preference:
+      type: array
+      label: Transport Preference Order
+      help: Drag rows to reorder. The first available transport in the list handles live delivery; later rows serve as fallbacks. Only transports installed in this Grav instance appear in the dropdown — leave empty to fall back to each transport's built-in priority.
+      value_only: true
+      create: false
+      data-options@: '\Grav\Plugin\Sync\Transport\TransportRegistry::availableTransports'
+      validate:
+        type: array
+
     section_storage:
       type: section
       title: Storage
@@ -42,11 +56,12 @@ form:
     storage.adapter:
       type: select
       label: Storage Adapter
-      default: file
-      help: Where Yjs update logs and snapshots are persisted. File is the default and works everywhere. SQLite requires the database plugin and is recommended for high-concurrency sites.
+      default: auto
+      help: Where Yjs update logs and snapshots are persisted. Auto prefers SQLite when the pdo_sqlite PHP extension is available and falls back to File otherwise. SQLite is recommended for high-concurrency sites — it avoids file-lock contention and survives unclean shutdowns better.
       options:
-        file: File (page-sibling sidecar)
-        sqlite: SQLite (via database plugin)
+        auto: Auto (prefer SQLite when available)
+        file: File (append-only log per room)
+        sqlite: SQLite (one database per room)
 
     section_squash:
       type: section

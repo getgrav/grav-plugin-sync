@@ -6,21 +6,61 @@ namespace Grav\Plugin;
 
 use Composer\Autoload\ClassLoader;
 use Grav\Common\Plugin;
+use Grav\Common\Uri;
 use Grav\Events\PermissionsRegisterEvent;
 use Grav\Framework\Acl\PermissionsReader;
+use Grav\Plugin\Sync\ChannelRegistry;
 use Grav\Plugin\Sync\Controllers\SyncController;
+use Grav\Plugin\Sync\Http\SyncLegacyRouter;
 use Grav\Plugin\Sync\PresenceStore;
 use Grav\Plugin\Sync\RoomRegistry;
+use Grav\Plugin\Sync\Storage\BroadcastStorage;
+use Grav\Plugin\Sync\Storage\FileBroadcastStorage;
 use Grav\Plugin\Sync\Storage\FileSyncStorage;
+use Grav\Plugin\Sync\Storage\SqliteSyncStorage;
+use Grav\Plugin\Sync\Sync;
 use Grav\Plugin\Sync\SyncStorage;
+use Grav\Plugin\Sync\Transport\PollingTransport;
+use Grav\Plugin\Sync\Transport\TransportRegistry;
 use RocketTheme\Toolbox\Event\Event;
 
 /**
- * Sync plugin — collaboration substrate.
+ * Sync plugin - collaboration substrate.
  *
  * Phase 1: storage + presence primitives registered as container services.
- * Phase 2: HTTP endpoints registered via grav-plugin-api's onApiRegisterRoutes
- *         hook; permissions registered via Grav's PermissionsRegisterEvent.
+ * Phase 2: HTTP endpoints registered via two routes that produce identical
+ *          behavior:
+ *
+ *   - When the api plugin (>= 1.0.0-beta.13) is installed, sync subscribes
+ *     to its `onApiRegisterRoutes` event and surfaces its endpoints under
+ *     the configured api prefix (default `/api/v1/sync/...`). Auth, rate
+ *     limiting, CORS, and error mapping all flow through the api plugin's
+ *     middleware exactly as before.
+ *
+ *   - When the api plugin is NOT installed (e.g. Grav 1.7, where the api
+ *     plugin can't run), sync subscribes to `onPageInitialized` and
+ *     dispatches matching `/sync/*` requests itself via SyncLegacyRouter.
+ *     The legacy dispatcher resolves the user from the active session,
+ *     decodes the JSON body, and routes into the same SyncController.
+ *
+ * The two paths are mutually exclusive: only one of `onApiRegisterRoutes`
+ * or `onPageInitialized` is wired up per process. SyncController is
+ * unaware of which path served the request.
+ *
+ * Phase 3: pub/sub generalisation. The CRDT pipeline above is unchanged
+ * and remains the only path editor-pro uses. Layered on top:
+ *
+ *   - $grav['sync']                  - public consumer-facing facade
+ *   - $grav['sync_transports']       - registry of TransportInterface impls
+ *   - $grav['sync_broadcast_storage']- TTL ring buffer for broadcast channels
+ *
+ * Two new boot events fire after services are wired:
+ *
+ *   - onSyncRegisterTransports - sync core's polling transport registers
+ *                                here; external plugins (sync-mercure,
+ *                                sync-ably) plug in here too.
+ *   - onSyncRegisterChannels   - consumer plugins register the channels
+ *                                they own here.
  */
 class SyncPlugin extends Plugin
 {
@@ -30,10 +70,36 @@ class SyncPlugin extends Plugin
 
     public static function getSubscribedEvents(): array
     {
+        // The HTTP entry-path subscription (onApiRegisterRoutes vs
+        // onPageInitialized) is added at runtime in onPluginsInitialized
+        // based on whether the api plugin is loaded. See that method for
+        // the rationale.
         return [
-            'onPluginsInitialized'        => [['onPluginsInitialized', 1000]],
-            'onApiRegisterRoutes'         => ['onApiRegisterRoutes', 0],
+            // Two passes on onPluginsInitialized:
+            //   1000 — register container services (sync_storage, sync_channels,
+            //          sync_transports, the public sync facade) and pick the
+            //          HTTP entry path. Side-car plugins (sync-mercure,
+            //          sync-ably) also run their onPluginsInitialized at 1000,
+            //          where they register $grav['mercure'] and
+            //          $grav['sync_ably'] respectively.
+            //   100  — fire onSyncRegisterTransports / onSyncRegisterChannels.
+            //          By this priority every plugin's 1000-tier handler has
+            //          run, so side-cars' static onSyncRegisterTransports
+            //          listeners can resolve their services from the container
+            //          and actually register their transports. Firing these
+            //          events from inside the 1000-priority pass would race
+            //          alphabetical plugin order and silently leave the
+            //          registry empty for any side-car that sorts after sync.
+            'onPluginsInitialized'        => [
+                ['onPluginsInitialized', 1000],
+                ['onPluginsInitializedRegistration', 100],
+            ],
             PermissionsRegisterEvent::class => ['onRegisterPermissions', 1000],
+            // Sync core's polling transport registers itself in the same
+            // event consumer plugins use; priority 100 keeps it ahead of
+            // user code so transports list ordering is deterministic
+            // when introspected during the same boot.
+            'onSyncRegisterTransports'    => [['onRegisterCorePollingTransport', 100]],
         ];
     }
 
@@ -49,16 +115,34 @@ class SyncPlugin extends Plugin
         }
 
         $this->grav['sync_storage'] = function (): SyncStorage {
-            $adapter = $this->config->get('plugins.sync.storage.adapter', 'file');
+            // 'auto' (the default) prefers sqlite when the pdo_sqlite
+            // extension is available and falls back to the file backend
+            // otherwise. Explicit 'sqlite' or 'file' overrides the choice.
+            $adapter = (string)$this->config->get('plugins.sync.storage.adapter', 'auto');
+            if ($adapter === 'auto') {
+                $adapter = extension_loaded('pdo_sqlite') ? 'sqlite' : 'file';
+            }
+
+            $base = rtrim(GRAV_ROOT, '/') . '/user/data/sync';
+
+            if ($adapter === 'sqlite') {
+                if (!extension_loaded('pdo_sqlite')) {
+                    throw new \RuntimeException(
+                        "sync: storage.adapter='sqlite' but the pdo_sqlite PHP extension is not loaded"
+                    );
+                }
+                return new SqliteSyncStorage($base . '/storage');
+            }
+
             if ($adapter === 'file') {
                 // Sync data lives outside user/pages so room storage never
                 // shows up as extra "pages" in admin. Routes are hashed
                 // before they hit the filesystem, so language/numeric-prefix
                 // mismatches with the actual page folder layout don't
                 // matter.
-                $root = rtrim(GRAV_ROOT, '/') . '/user/data/sync';
-                return new FileSyncStorage($root);
+                return new FileSyncStorage($base);
             }
+
             throw new \RuntimeException("sync: unsupported storage adapter '{$adapter}'");
         };
 
@@ -72,12 +156,85 @@ class SyncPlugin extends Plugin
         $this->grav['sync_rooms'] = function (): RoomRegistry {
             return new RoomRegistry();
         };
+
+        $this->grav['sync_broadcast_storage'] = function (): BroadcastStorage {
+            $root = rtrim(GRAV_ROOT, '/') . '/user/data/sync/broadcast';
+            return new FileBroadcastStorage($root);
+        };
+
+        $this->grav['sync_channels'] = function (): ChannelRegistry {
+            return new ChannelRegistry();
+        };
+
+        $this->grav['sync_transports'] = function (): TransportRegistry {
+            return new TransportRegistry();
+        };
+
+        $this->grav['sync'] = function (): Sync {
+            return new Sync(
+                $this->grav,
+                $this->grav['sync_channels'],
+                $this->grav['sync_transports']
+            );
+        };
+
+        // Wire the right HTTP entry path. We can't decide this in the
+        // static getSubscribedEvents() because the api plugin may load
+        // after static dispatch is built. enable() registers the handler
+        // dynamically against the live event dispatcher.
+        if (\class_exists(\Grav\Plugin\Api\ApiRouteCollector::class)) {
+            $this->enable([
+                'onApiRegisterRoutes' => ['onApiRegisterRoutes', 0],
+            ]);
+        } else {
+            $this->enable([
+                'onPageInitialized' => ['onPageInitialized', 0],
+            ]);
+        }
+    }
+
+    /**
+     * Second-pass plugin init at priority 100. Runs after every plugin's
+     * priority-1000 onPluginsInitialized handler, so side-car services
+     * (e.g. $grav['mercure'], $grav['sync_ably']) are guaranteed to be
+     * in the container before we ask transports / channel owners to
+     * register themselves.
+     */
+    public function onPluginsInitializedRegistration(): void
+    {
+        if (!$this->config->get('plugins.sync.enabled')) {
+            return;
+        }
+
+        // Transports first so the channel facade has a populated transport
+        // registry by the time consumer plugins start wiring channels —
+        // some may peek at available transports during registration.
+        $this->grav->fireEvent('onSyncRegisterTransports', new Event([
+            'transports' => $this->grav['sync_transports'],
+            'sync' => $this->grav['sync'],
+        ]));
+        $this->grav->fireEvent('onSyncRegisterChannels', new Event([
+            'sync' => $this->grav['sync'],
+            'channels' => $this->grav['sync_channels'],
+        ]));
+    }
+
+    /**
+     * Register sync's built-in polling transport. Always available;
+     * priority 0 means it serves as the universal floor that any push
+     * transport can outbid.
+     */
+    public function onRegisterCorePollingTransport(Event $event): void
+    {
+        /** @var TransportRegistry $registry */
+        $registry = $event['transports'];
+        $registry->register(new PollingTransport($this->grav));
     }
 
     /**
      * Register our endpoints with grav-plugin-api. This event is dispatched
      * by ApiRouter::registerPluginRoutes(); $event['routes'] is an
-     * ApiRouteCollector.
+     * ApiRouteCollector. Only wired up when the api plugin is loaded.
      */
     public function onApiRegisterRoutes(Event $event): void
     {
@@ -96,6 +253,50 @@ class SyncPlugin extends Plugin
             $r->post('/init',     [SyncController::class, 'init']);
             $r->post('/presence', [SyncController::class, 'presence']);
         });
+
+        // Channel-scoped pub/sub endpoints. The channel id rides in the
+        // query string (`?id=...`) rather than as a path segment, because
+        // Grav's URI parser eats `:`-bearing path segments as URI params
+        // (`system.param_sep` defaults to `:`), and channel ids legitimately
+        // contain colons (e.g. `comments-pro:blog/post-1`). Keeping the id
+        // off the path side-steps that entirely.
+        $routes->get('/sync/channels/pull',     [SyncController::class, 'channelPull']);
+        $routes->post('/sync/channels/publish', [SyncController::class, 'channelPublish']);
+    }
+
+    /**
+     * Legacy HTTP dispatcher for environments without the api plugin.
+     * Matches `/sync/*` paths and hands off to SyncLegacyRouter, which
+     * builds a PSR-7 request from the globals and invokes the same
+     * SyncController actions the api path uses.
+     */
+    public function onPageInitialized(): void
+    {
+        if (!$this->config->get('plugins.sync.enabled')) {
+            return;
+        }
+
+        /** @var Uri $uri */
+        $uri = $this->grav['uri'];
+        $path = $uri->path();
+        if (!is_string($path)) {
+            return;
+        }
+
+        // On subpath installs (e.g. /sync-testing/grav-c) $uri->path() may
+        // include the base; strip it before checking the /sync/ prefix so
+        // the legacy router doesn't silently bail.
+        $base = rtrim((string)$uri->rootUrl(false), '/');
+        if ($base !== '' && str_starts_with($path, $base)) {
+            $path = substr($path, strlen($base));
+        }
+
+        if (!str_starts_with($path, '/sync/')) {
+            return;
+        }
+
+        $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
+        (new SyncLegacyRouter($this->grav))->tryHandle($path, $method);
     }
 
     public function onRegisterPermissions(PermissionsRegisterEvent $event): void

@@ -4,12 +4,17 @@ declare(strict_types=1);
 
 namespace Grav\Plugin\Sync\Controllers;
 
-use Grav\Plugin\Api\Controllers\AbstractApiController;
-use Grav\Plugin\Api\Exceptions\NotFoundException;
-use Grav\Plugin\Api\Exceptions\ValidationException;
-use Grav\Plugin\Api\Response\ApiResponse;
+use Grav\Plugin\Sync\Channel;
+use Grav\Plugin\Sync\Http\AbstractSyncController;
+use Grav\Plugin\Sync\Http\Exceptions\ForbiddenException;
+use Grav\Plugin\Sync\Http\Exceptions\NotFoundException;
+use Grav\Plugin\Sync\Http\Exceptions\ValidationException;
+use Grav\Plugin\Sync\Http\SyncResponse;
+use Grav\Plugin\Sync\Message\BroadcastMessage;
+use Grav\Plugin\Sync\MessageType;
 use Grav\Plugin\Sync\PresenceStore;
 use Grav\Plugin\Sync\RoomRegistry;
+use Grav\Plugin\Sync\Sync;
 use Grav\Plugin\Sync\SyncRoom;
 use Grav\Plugin\Sync\SyncStorage;
 use Psr\Http\Message\ResponseInterface;
@@ -18,17 +23,22 @@ use Psr\Http\Message\ServerRequestInterface;
 /**
  * Collaboration sync endpoints.
  *
- * All endpoints live under the API plugin's configured prefix (default
- * "/api/v1/sync/..."). Binary Yjs updates are carried as base64 inside
- * the JSON envelope.
+ * Reachable at "/api/v1/sync/..." when the api plugin is installed (it
+ * dispatches into these methods via onApiRegisterRoutes), and at
+ * "/sync/..." via the legacy dispatcher in sync.php when running on
+ * Grav 1.7 or any setup without the api plugin. Binary Yjs updates are
+ * carried as base64 inside the JSON envelope.
  *
- * Authentication and permissions inherit from AbstractApiController:
- *   - api.collab.read   — pull + presence
- *   - api.collab.write  — push + presence heartbeat with writes
- *   - api.pages.read    — also required; sync is gated by normal page ACL
- *   - api.pages.write   — also required for push
+ * Authentication and permissions inherit from AbstractSyncController:
+ *   - api.collab.read   - pull + presence
+ *   - api.collab.write  - push + presence heartbeat with writes
+ *   - api.pages.read    - also required; sync is gated by normal page ACL
+ *   - api.pages.write   - also required for push
+ *
+ * Round 3 adds the channel-scoped endpoints below for the broadcast
+ * pub/sub model. Page-scoped CRDT endpoints are unchanged on the wire.
  */
-class SyncController extends AbstractApiController
+class SyncController extends AbstractSyncController
 {
     private const PERMISSION_READ  = 'api.collab.read';
     private const PERMISSION_WRITE = 'api.collab.write';
@@ -46,9 +56,36 @@ class SyncController extends AbstractApiController
         $idle = (int)$this->config->get('plugins.sync.polling.idle_interval_ms', 4000);
         $active = (int)$this->config->get('plugins.sync.polling.active_interval_ms', 1000);
 
+        // Enumerate registered transports for the capabilities response.
+        // Highest priority wins the `preferred` slot; if nothing is
+        // registered (shouldn't happen because polling is always
+        // registered) we fall back to 'polling' as a safe default.
+        $sync = $this->sync();
+        $transportList = [];
+        $preferred = 'polling';
+        $bestPriority = PHP_INT_MIN;
+        foreach ($sync->transports() as $t) {
+            if (!$t->isAvailable()) {
+                continue;
+            }
+            $transportList[] = [
+                'id' => $t->id(),
+                'name' => $t->name(),
+                'priority' => $t->priority(),
+                'supports' => $t->supportedMessageTypes(),
+            ];
+            if ($t->priority() > $bestPriority) {
+                $bestPriority = $t->priority();
+                $preferred = $t->id();
+            }
+        }
+
         $caps = [
-            'transports' => ['polling'],
-            'preferred' => 'polling',
+            'transports' => $transportList,
+            'preferred' => $preferred,
+            // The polling and presence sub-blocks are byte-identical to
+            // their pre-Round-3 form. Editor-pro's existing parser reads
+            // them directly; do not change shape, key order, or types.
             'polling' => [
                 'idle_interval_ms' => $idle,
                 'active_interval_ms' => $active,
@@ -66,7 +103,7 @@ class SyncController extends AbstractApiController
         $this->grav->fireEvent('onSyncCapabilities', $event);
         $caps = $event['capabilities'] ?? $caps;
 
-        return ApiResponse::create($caps);
+        return SyncResponse::create($caps);
     }
 
     // ------------------------------------------------------------------
@@ -80,6 +117,7 @@ class SyncController extends AbstractApiController
 
         $body = $this->getRequestBody($request);
         $room = $this->resolveRoom($request, $body);
+        $this->ensureCrdtChannel($room);
         $since = max(0, (int)($body['since'] ?? 0));
 
         $storage = $this->storage();
@@ -88,7 +126,7 @@ class SyncController extends AbstractApiController
         $updates = array_map('base64_encode', $res['updates']);
         $peers = $this->presenceStore()->peers($room->id);
 
-        return ApiResponse::create([
+        return SyncResponse::create([
             'updates' => $updates,
             'offset' => $res['offset'],
             'size' => $res['size'],
@@ -109,6 +147,7 @@ class SyncController extends AbstractApiController
 
         $body = $this->getRequestBody($request);
         $room = $this->resolveRoom($request, $body);
+        $this->ensureCrdtChannel($room);
         $this->requireFields($body, ['update']);
 
         $update = base64_decode((string)$body['update'], true);
@@ -130,7 +169,7 @@ class SyncController extends AbstractApiController
             'updateBytes' => strlen($update),
         ]));
 
-        return ApiResponse::create([
+        return SyncResponse::create([
             'ok' => true,
             'offset' => $size,
             'bytes' => strlen($update),
@@ -157,6 +196,7 @@ class SyncController extends AbstractApiController
 
         $body = $this->getRequestBody($request);
         $room = $this->resolveRoom($request, $body);
+        $this->ensureCrdtChannel($room);
         $this->requireFields($body, ['seed']);
 
         $seed = base64_decode((string)$body['seed'], true);
@@ -193,7 +233,7 @@ class SyncController extends AbstractApiController
             $response['updates'] = array_map('base64_encode', $res['updates']);
         }
 
-        return ApiResponse::create($response);
+        return SyncResponse::create($response);
     }
 
     // ------------------------------------------------------------------
@@ -235,9 +275,116 @@ class SyncController extends AbstractApiController
             }
         }
 
-        return ApiResponse::create([
+        return SyncResponse::create([
             'peers' => $presence->peers($room->id),
         ]);
+    }
+
+    // ------------------------------------------------------------------
+    // GET /sync/channels/{id}/pull?since={ts}
+    // ------------------------------------------------------------------
+
+    /**
+     * Read broadcast messages for a channel since the given timestamp.
+     *
+     * Auth: must be authenticated, AND Sync::checkAccess($channelId,
+     * $user, 'subscribe') must return true. The api.collab.read +
+     * api.pages.read pair on the page-scoped endpoints isn't appropriate
+     * here, because channels aren't necessarily page-scoped; per-channel
+     * auth is delegated to the owner plugin via checkAccess.
+     */
+    public function channelPull(ServerRequestInterface $request): ResponseInterface
+    {
+        $user = $this->getUser($request);
+        $channelId = $this->requireChannelId($request);
+        $channel = $this->requireChannel($channelId);
+
+        if (!$this->sync()->checkAccess($channelId, $user, 'subscribe')) {
+            throw new ForbiddenException("Not authorized to subscribe to channel '{$channelId}'.");
+        }
+
+        $params = $request->getQueryParams();
+        $since = isset($params['since']) ? (int)$params['since'] : null;
+
+        $messages = [];
+        if ($channel->messageType === MessageType::Broadcast) {
+            $messages = $this->sync()->broadcastStorage()->since($channelId, $since);
+        }
+
+        return SyncResponse::create([
+            'channel' => $channel->id,
+            'messageType' => $channel->messageType->value,
+            'messages' => $messages,
+            'serverTimeMs' => (int)(microtime(true) * 1000),
+        ]);
+    }
+
+    // ------------------------------------------------------------------
+    // POST /sync/channels/{id}/publish
+    // ------------------------------------------------------------------
+
+    /**
+     * Publish a broadcast or awareness message into a channel from the
+     * client side. Most consumer plugins publish from PHP via
+     * Sync::publish() and won't expose this endpoint in their UI; it
+     * exists so client-driven flows (typing indicators, ad-hoc
+     * comments-pro emoji reactions, etc.) can broadcast without round-
+     * tripping through a plugin-specific REST endpoint.
+     *
+     * Auth: Sync::checkAccess($channelId, $user, 'publish') must allow.
+     * Crdt channels are intentionally rejected here — CRDT writes go
+     * through /sync/pages/{route}/push so they hit the canonical room
+     * storage with the same wire format editor-pro relies on.
+     */
+    public function channelPublish(ServerRequestInterface $request): ResponseInterface
+    {
+        $user = $this->getUser($request);
+        $channelId = $this->requireChannelId($request);
+        $channel = $this->requireChannel($channelId);
+
+        if ($channel->messageType === MessageType::Crdt) {
+            throw new ValidationException(
+                "Channel '{$channelId}' is a crdt channel; use /sync/pages/{route}/push for crdt writes."
+            );
+        }
+
+        if (!$this->sync()->checkAccess($channelId, $user, 'publish')) {
+            throw new ForbiddenException("Not authorized to publish to channel '{$channelId}'.");
+        }
+
+        $body = $this->getRequestBody($request);
+
+        switch ($channel->messageType) {
+            case MessageType::Broadcast:
+                $payload = is_array($body['payload'] ?? null) ? $body['payload'] : null;
+                if ($payload === null) {
+                    throw new ValidationException('`payload` is required for broadcast channels.');
+                }
+                $eventName = isset($body['event']) ? (string)$body['event'] : null;
+                $message = new BroadcastMessage($payload, $eventName);
+                $this->sync()->publish($channelId, $message);
+                return SyncResponse::create([
+                    'ok' => true,
+                    'channel' => $channel->id,
+                    'timestamp' => $message->timestamp,
+                ]);
+
+            case MessageType::Awareness:
+                $payload = is_array($body['payload'] ?? null) ? $body['payload'] : [];
+                $sourceClientId = isset($body['clientId']) ? (string)$body['clientId'] : '';
+                if ($sourceClientId === '') {
+                    throw new ValidationException('`clientId` is required for awareness channels.');
+                }
+                $message = new \Grav\Plugin\Sync\Message\AwarenessMessage($payload, $sourceClientId);
+                $this->sync()->publish($channelId, $message);
+                return SyncResponse::create([
+                    'ok' => true,
+                    'channel' => $channel->id,
+                ]);
+
+            default:
+                throw new ValidationException("Channel '{$channelId}' has unsupported message type for publish endpoint.");
+        }
     }
 
     // ------------------------------------------------------------------
@@ -276,6 +423,101 @@ class SyncController extends AbstractApiController
         $pages->enablePages();
     }
 
+    /**
+     * Lazy-register a CRDT channel for a room when an existing CRDT
+     * endpoint touches it. Backward-compat: editor-pro never explicitly
+     * registers channels, but Round 3 wants every active room visible
+     * through the channel registry for diagnostics + future transports.
+     *
+     * The auth callback for these auto-registered channels is null, so
+     * any subscribe/publish access check would fall through to the
+     * onSyncCheckAccess event. CRDT writes don't go through that path
+     * (they use the page-scoped /pull /push /init endpoints with their
+     * own permission gating) so the lack of an auth callback here is
+     * not a privilege escalation.
+     *
+     * Before the auto-register fallback runs, fire `onSyncBeforeCrdtChannelRegistered`
+     * so plugins can register the channel themselves with a real auth
+     * callback. Editor-pro listens and routes to its
+     * `EditorProPlugin::ensureSyncChannelRegistered()` helper, which
+     * gates the channel on `api.collab.*` + `api.pages.*`. If a listener
+     * registers the channel, the auto-register branch below short-circuits.
+     */
+    private function ensureCrdtChannel(SyncRoom $room): void
+    {
+        $sync = $this->sync();
+        $channelId = 'editor-pro:' . $room->id;
+        if ($sync->getChannel($channelId) !== null) {
+            return;
+        }
+
+        $this->grav->fireEvent('onSyncBeforeCrdtChannelRegistered', new \RocketTheme\Toolbox\Event\Event([
+            'channelId' => $channelId,
+            'room' => $room,
+            'sync' => $sync,
+        ]));
+        if ($sync->getChannel($channelId) !== null) {
+            return;
+        }
+
+        $sync->registerChannel(new Channel(
+            id: $channelId,
+            ownerPlugin: 'editor-pro',
+            messageType: MessageType::Crdt,
+            authCallback: null,
+            metadata: [
+                'room' => $room->id,
+                'route' => $room->route,
+                'template' => $room->template,
+                'language' => $room->language,
+                'autoRegistered' => true,
+            ],
+        ));
+    }
+
+    private function requireChannelId(ServerRequestInterface $request): string
+    {
+        // Channel id lives in the query string — see the channel route
+        // definitions for why it's not a path segment. Fall back to the
+        // legacy `route_params['id']` so any caller still using the old
+        // `/sync/channels/{id}/...` shape keeps working.
+        $params = $request->getQueryParams();
+        $id = isset($params['id']) ? (string)$params['id'] : '';
+
+        if ($id === '') {
+            $id = (string)($this->getRouteParam($request, 'id') ?? '');
+        }
+
+        if ($id === '') {
+            throw new ValidationException('Channel id required.');
+        }
+        return $id;
+    }
+
+    private function requireChannel(string $channelId): Channel
+    {
+        $sync = $this->sync();
+        $channel = $sync->getChannel($channelId);
+
+        if ($channel === null) {
+            // Lazy-registration hook: consumer plugins (comments-pro, etc.)
+            // typically register their channels on first publish from their
+            // own request lifecycle. A sync pull/publish request doesn't
+            // run that code path, so fire an event giving owner plugins
+            // one last chance to register before we 404.
+            $this->grav->fireEvent('onSyncResolveChannel', new \RocketTheme\Toolbox\Event\Event([
+                'channelId' => $channelId,
+                'sync' => $sync,
+            ]));
+            $channel = $sync->getChannel($channelId);
+        }
+
+        if ($channel === null) {
+            throw new NotFoundException("Channel not found: {$channelId}");
+        }
+        return $channel;
+    }
+
     private function storage(): SyncStorage
     {
         return $this->grav['sync_storage'];
@@ -289,5 +531,10 @@ class SyncController extends AbstractApiController
     private function rooms(): RoomRegistry
     {
         return $this->grav['sync_rooms'];
+    }
+
+    private function sync(): Sync
+    {
+        return $this->grav['sync'];
     }
 }
