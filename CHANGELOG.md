@@ -1,3 +1,9 @@
+# v1.1.1
+## 05/18/2026
+
+1. [](#bugfix)
+    * Removed `vendor` from `.gitignore` file, so it's included in package
+
 # v1.1.0
 ## 05/13/2026
 
