@@ -305,14 +305,9 @@ The polling intervals are advertised to clients via `GET /sync/capabilities`; cl
 
 ## Permissions
 
-Defined in `permissions.yaml` and registered with Grav's ACL:
+Collaboration is gated by normal page ACL — `api.pages.read` for pulls / presence, `api.pages.write` for pushes — on the principle that collab is just a different transport for the same content. Anyone who can edit a page via the page API can also edit it collaboratively, and granting page access is enough; no separate collab permission needs to be granted.
 
-| Permission | Granted for |
-|------------|-------------|
-| `api.collab.read`  | `pull`, `presence` |
-| `api.collab.write` | `push`, `init`, presence with writes |
-
-Normal page ACL is also enforced (`api.pages.read` for pulls, `api.pages.write` for pushes), so collaboration cannot escalate beyond what the user can already do via the page API. Channel-scoped pub/sub endpoints additionally consult `Sync::checkAccess()` so consumer plugins enforce their own per-channel rules.
+Channel-scoped pub/sub endpoints additionally consult `Sync::checkAccess()` so consumer plugins enforce their own per-channel rules.
 
 ## Storage backends
 

@@ -7,10 +7,11 @@ namespace Grav\Plugin;
 use Composer\Autoload\ClassLoader;
 use Grav\Common\Plugin;
 use Grav\Common\Uri;
-use Grav\Events\PermissionsRegisterEvent;
-use Grav\Framework\Acl\PermissionsReader;
+use Grav\Plugin\Sync\Channel;
 use Grav\Plugin\Sync\ChannelRegistry;
 use Grav\Plugin\Sync\Controllers\SyncController;
+use Grav\Plugin\Sync\Message\BroadcastMessage;
+use Grav\Plugin\Sync\MessageType;
 use Grav\Plugin\Sync\Http\SyncLegacyRouter;
 use Grav\Plugin\Sync\PresenceStore;
 use Grav\Plugin\Sync\RoomRegistry;
@@ -94,12 +95,19 @@ class SyncPlugin extends Plugin
                 ['onPluginsInitialized', 1000],
                 ['onPluginsInitializedRegistration', 100],
             ],
-            PermissionsRegisterEvent::class => ['onRegisterPermissions', 1000],
             // Sync core's polling transport registers itself in the same
             // event consumer plugins use; priority 100 keeps it ahead of
             // user code so transports list ordering is deterministic
             // when introspected during the same boot.
             'onSyncRegisterTransports'    => [['onRegisterCorePollingTransport', 100]],
+            // Broadcast a `page-saved` event to peers after the api plugin
+            // writes a page to disk. Late priority — runs after the api
+            // plugin's own listeners have settled the page state.
+            'onApiPageUpdated'            => [['onApiPageUpdated', 100]],
+            // Lazy-register our own `sync:page-saved:<roomId>` channels when a
+            // client pulls/subscribes before the first save in this worker has
+            // happened. Without this the editor 404s on its initial subscribe.
+            'onSyncResolveChannel'        => [['onSyncResolveChannel', 0]],
         ];
     }
 
@@ -299,9 +307,151 @@ class SyncPlugin extends Plugin
         (new SyncLegacyRouter($this->grav))->tryHandle($path, $method);
     }
 
-    public function onRegisterPermissions(PermissionsRegisterEvent $event): void
+    /**
+     * Fan out a `page-saved` broadcast to peers in the same collab room
+     * after the api plugin writes a page to disk. Editors subscribed to
+     * the page's broadcast channel use this to advance their local
+     * baseline so the unsaved-changes guard doesn't trip on edits a peer
+     * already saved.
+     *
+     * Channel id: `sync:page-saved:<roomId>`. Lazily registered the
+     * first time a save happens for the room; auth is page-read since
+     * subscribers shouldn't learn about saves on pages they can't see.
+     * Publish is server-side only — clients never call the publish
+     * endpoint for this channel.
+     */
+    public function onApiPageUpdated(Event $event): void
     {
-        $actions = PermissionsReader::fromYaml("plugin://{$this->name}/permissions.yaml");
-        $event->permissions->addActions($actions);
+        $page = $event['page'] ?? null;
+        if (!$page instanceof \Grav\Common\Page\Interfaces\PageInterface) {
+            return;
+        }
+        if (!isset($this->grav['sync'], $this->grav['sync_rooms'])) {
+            return;
+        }
+
+        /** @var Sync $sync */
+        $sync = $this->grav['sync'];
+        /** @var RoomRegistry $rooms */
+        $rooms = $this->grav['sync_rooms'];
+
+        try {
+            $lang = $page->language() ?: null;
+            $room = $rooms->roomForPage($page, $lang);
+        } catch (\Throwable) {
+            return; // page with no usable route — nothing to broadcast against
+        }
+
+        $channelId = 'sync:page-saved:' . $room->id;
+        $this->ensurePageSavedChannel($sync, $channelId);
+
+        $savedBy = null;
+        $user = $this->grav['user'] ?? null;
+        if ($user && (bool) ($user->authenticated ?? false)) {
+            $savedBy = [
+                'username' => (string) ($user->username ?? ''),
+                'fullname' => (string) ($user->fullname ?? ''),
+            ];
+        }
+
+        $payload = [
+            'kind' => 'page-saved',
+            'roomId' => $room->id,
+            'route' => $room->route,
+            'template' => $room->template,
+            'language' => $room->language,
+            'savedAt' => (int) (microtime(true) * 1000),
+            'savedBy' => $savedBy,
+        ];
+
+        try {
+            $sync->publish($channelId, new BroadcastMessage($payload, 'page-saved'));
+        } catch (\Throwable) {
+            // Sync transport not yet ready, or storage unavailable.
+            // Don't let a notification failure abort the save flow.
+        }
     }
+
+    /**
+     * Lazy-registration hook from SyncController::requireChannel. A pull or
+     * subscribe request can name a `sync:page-saved:<roomId>` channel before
+     * any save has happened in this worker, so the channel won't be in the
+     * in-process registry yet. Register it on demand so the request is served
+     * (with an empty/whatever-is-buffered broadcast) instead of 404ing.
+     */
+    public function onSyncResolveChannel(Event $event): void
+    {
+        $channelId = (string)($event['channelId'] ?? '');
+        if (!str_starts_with($channelId, 'sync:page-saved:')) {
+            return;
+        }
+        if (!isset($this->grav['sync'], $this->grav['sync_rooms'])) {
+            return;
+        }
+
+        // Validate the room id encoded in the channel id before registering,
+        // so a malformed/hostile id doesn't mint a junk channel.
+        $roomId = substr($channelId, strlen('sync:page-saved:'));
+        try {
+            $this->grav['sync_rooms']->parse($roomId);
+        } catch (\Throwable) {
+            return;
+        }
+
+        $this->ensurePageSavedChannel($this->grav['sync'], $channelId);
+    }
+
+    /**
+     * Register the `sync:page-saved:<roomId>` broadcast channel if it isn't
+     * already known to this worker. Shared by the save broadcaster and the
+     * lazy-resolution hook so both paths register identical auth + TTL.
+     */
+    private function ensurePageSavedChannel(Sync $sync, string $channelId): void
+    {
+        if ($sync->getChannel($channelId) !== null) {
+            return;
+        }
+        $grav = $this->grav;
+        $sync->registerChannel(new Channel(
+            id: $channelId,
+            ownerPlugin: 'sync',
+            messageType: MessageType::Broadcast,
+            // Subscribe is the only client-facing action — gated on
+            // page-read so subscribers can't learn about saves on
+            // pages they couldn't otherwise see. Publish is
+            // server-side only; reject any client publish attempt.
+            authCallback: static fn ($user, string $action): bool =>
+                $user !== null
+                && $action === 'subscribe'
+                && self::userCanReadPages($grav, $user),
+            broadcastTtlSeconds: 60,
+            broadcastMaxMessages: 10,
+        ));
+    }
+
+    /**
+     * Resolve `api.pages.read` for a user the same way the HTTP endpoints do
+     * (AbstractSyncController::requirePermission): super-admin bypass first,
+     * then the api plugin's PermissionResolver so group/role inheritance and
+     * the `api.access` gate are honored, falling back to a raw access lookup
+     * when the api plugin isn't loaded. A raw `$user->get('access.api.pages.read')`
+     * alone would 403 super admins, who hold `access.api.super` but no explicit
+     * pages.read grant.
+     */
+    private static function userCanReadPages($grav, $user): bool
+    {
+        if ((bool) $user->get('access.api.super')) {
+            return true;
+        }
+
+        if (\class_exists(\Grav\Plugin\Api\PermissionResolver::class, true)
+            && isset($grav['permissions'])) {
+            $resolver = new \Grav\Plugin\Api\PermissionResolver($grav['permissions']);
+            return $resolver->resolve($user, 'api.access')
+                && $resolver->resolve($user, 'api.pages.read');
+        }
+
+        return (bool) $user->get('access.api.pages.read');
+    }
+
 }

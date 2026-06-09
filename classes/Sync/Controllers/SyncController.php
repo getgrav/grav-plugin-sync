@@ -30,19 +30,15 @@ use Psr\Http\Message\ServerRequestInterface;
  * carried as base64 inside the JSON envelope.
  *
  * Authentication and permissions inherit from AbstractSyncController:
- *   - api.collab.read   - pull + presence
- *   - api.collab.write  - push + presence heartbeat with writes
- *   - api.pages.read    - also required; sync is gated by normal page ACL
- *   - api.pages.write   - also required for push
+ *   - api.pages.read    - pull + presence (collab is just a different
+ *                         read transport for the same content)
+ *   - api.pages.write   - push + presence heartbeat with writes
  *
  * Round 3 adds the channel-scoped endpoints below for the broadcast
  * pub/sub model. Page-scoped CRDT endpoints are unchanged on the wire.
  */
 class SyncController extends AbstractSyncController
 {
-    private const PERMISSION_READ  = 'api.collab.read';
-    private const PERMISSION_WRITE = 'api.collab.write';
-
     // ------------------------------------------------------------------
     // GET /sync/capabilities
     // ------------------------------------------------------------------
@@ -112,7 +108,6 @@ class SyncController extends AbstractSyncController
 
     public function pull(ServerRequestInterface $request): ResponseInterface
     {
-        $this->requirePermission($request, self::PERMISSION_READ);
         $this->requirePermission($request, 'api.pages.read');
 
         $body = $this->getRequestBody($request);
@@ -142,7 +137,6 @@ class SyncController extends AbstractSyncController
 
     public function push(ServerRequestInterface $request): ResponseInterface
     {
-        $this->requirePermission($request, self::PERMISSION_WRITE);
         $this->requirePermission($request, 'api.pages.write');
 
         $body = $this->getRequestBody($request);
@@ -191,7 +185,6 @@ class SyncController extends AbstractSyncController
      */
     public function init(ServerRequestInterface $request): ResponseInterface
     {
-        $this->requirePermission($request, self::PERMISSION_WRITE);
         $this->requirePermission($request, 'api.pages.write');
 
         $body = $this->getRequestBody($request);
@@ -242,7 +235,6 @@ class SyncController extends AbstractSyncController
 
     public function presence(ServerRequestInterface $request): ResponseInterface
     {
-        $this->requirePermission($request, self::PERMISSION_READ);
         $this->requirePermission($request, 'api.pages.read');
 
         $body = $this->getRequestBody($request);
@@ -288,10 +280,10 @@ class SyncController extends AbstractSyncController
      * Read broadcast messages for a channel since the given timestamp.
      *
      * Auth: must be authenticated, AND Sync::checkAccess($channelId,
-     * $user, 'subscribe') must return true. The api.collab.read +
-     * api.pages.read pair on the page-scoped endpoints isn't appropriate
-     * here, because channels aren't necessarily page-scoped; per-channel
-     * auth is delegated to the owner plugin via checkAccess.
+     * $user, 'subscribe') must return true. The api.pages.read gate on
+     * the page-scoped endpoints isn't appropriate here, because channels
+     * aren't necessarily page-scoped; per-channel auth is delegated to
+     * the owner plugin via checkAccess.
      */
     public function channelPull(ServerRequestInterface $request): ResponseInterface
     {
@@ -440,8 +432,8 @@ class SyncController extends AbstractSyncController
      * so plugins can register the channel themselves with a real auth
      * callback. Editor-pro listens and routes to its
      * `EditorProPlugin::ensureSyncChannelRegistered()` helper, which
-     * gates the channel on `api.collab.*` + `api.pages.*`. If a listener
-     * registers the channel, the auto-register branch below short-circuits.
+     * gates the channel on `api.pages.*`. If a listener registers the
+     * channel, the auto-register branch below short-circuits.
      */
     private function ensureCrdtChannel(SyncRoom $room): void
     {
