@@ -1,3 +1,14 @@
+# v1.1.2
+## 06/08/2026
+
+1. [](#new)
+    * **New `sync:page-saved:<roomId>` broadcast channel.** Fires whenever a page is saved through the api plugin so peer editors in the same collab room can advance their dirty baseline and stop showing phantom unsaved changes. Subscribers need `api.pages.read` on the page. Used by admin-next to fix [getgrav/grav-plugin-admin2#25](https://github.com/getgrav/grav-plugin-admin2/issues/25).
+2. [](#improved)
+    * **Collaborative editing now uses regular page permissions instead of a separate `api.collab.*` permission.** Anyone who can read or write a page via the API can do the same collaboratively — no extra grant needed. Fixes [getgrav/grav-plugin-admin2#24](https://github.com/getgrav/grav-plugin-admin2/issues/24).
+3. [](#bugfix)
+    * Fixed a 404 error when an editor subscribed to a page's save-notification channel before the first save had happened.
+    * Fixed a 403 error that wrongly blocked super admins from subscribing to a page's save-notification channel.
+
 # v1.1.1
 ## 05/18/2026
 

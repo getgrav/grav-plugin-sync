@@ -6,8 +6,8 @@
 #
 # Prerequisites:
 #   - Grav + api plugin + sync plugin installed and enabled
-#   - User with api.collab.read, api.collab.write, api.pages.read,
-#     api.pages.write, api.access permissions (or super admin)
+#   - User with api.pages.read, api.pages.write, api.access permissions
+#     (or super admin)
 #   - jq, curl
 #
 # Usage:
@@ -105,7 +105,7 @@ PEERS2=$(echo "$PRES2" | jq -r '.data.peers | length')
 ok "presence leave honored (remaining peers=$PEERS2)"
 
 # ---------------------------------------------------------------------
-say "negative: push without api.collab.write"
+say "negative: push without api.pages.write"
 # This sub-test only runs if TEST_UNPRIV_USER is provided.
 if [[ -n "${TEST_UNPRIV_USER:-}" && -n "${TEST_UNPRIV_PASS:-}" ]]; then
   UNPRIV_TOKEN=$(curl -sS -X POST "$API/auth/token" \
