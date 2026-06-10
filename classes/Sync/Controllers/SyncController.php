@@ -287,7 +287,7 @@ class SyncController extends AbstractSyncController
      */
     public function channelPull(ServerRequestInterface $request): ResponseInterface
     {
-        $user = $this->getUser($request);
+        $user = $this->getUserOptional($request);
         $channelId = $this->requireChannelId($request);
         $channel = $this->requireChannel($channelId);
 
@@ -330,7 +330,7 @@ class SyncController extends AbstractSyncController
      */
     public function channelPublish(ServerRequestInterface $request): ResponseInterface
     {
-        $user = $this->getUser($request);
+        $user = $this->getUserOptional($request);
         $channelId = $this->requireChannelId($request);
         $channel = $this->requireChannel($channelId);
 

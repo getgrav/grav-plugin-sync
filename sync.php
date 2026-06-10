@@ -193,6 +193,7 @@ class SyncPlugin extends Plugin
         if (\class_exists(\Grav\Plugin\Api\ApiRouteCollector::class)) {
             $this->enable([
                 'onApiRegisterRoutes' => ['onApiRegisterRoutes', 0],
+                'onApiCollectPublicRoutes' => ['onApiCollectPublicRoutes', 0],
             ]);
         } else {
             $this->enable([
@@ -237,6 +238,26 @@ class SyncPlugin extends Plugin
         /** @var TransportRegistry $registry */
         $registry = $event['transports'];
         $registry->register(new PollingTransport($this->grav));
+    }
+
+    /**
+     * The channel pull/publish endpoints run optimistic auth: anonymous
+     * requests reach the controller as guests and every channel's own
+     * authCallback (or onSyncCheckAccess, default deny) decides. Without
+     * this, guests on public broadcast channels could never use the
+     * polling fallback — the api auth layer 401'd them at the door.
+     */
+    public function onApiCollectPublicRoutes(Event $event): void
+    {
+        if (!$this->config->get('plugins.sync.enabled')) {
+            return;
+        }
+
+        $apiBase = (string)$event['api_base'];
+        $exact = (array)($event['exact'] ?? []);
+        $exact[] = 'GET ' . $apiBase . '/sync/channels/pull';
+        $exact[] = 'POST ' . $apiBase . '/sync/channels/publish';
+        $event['exact'] = $exact;
     }
 
     /**

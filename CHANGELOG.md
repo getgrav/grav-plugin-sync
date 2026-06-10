@@ -1,3 +1,9 @@
+# v1.1.3
+## 06/10/2026
+
+1. [](#bugfix)
+    * Guests can now use the polling fallback on public channels — the channel pull and publish endpoints accept anonymous requests and let each channel's own access check decide
+
 # v1.1.2
 ## 06/08/2026
 
