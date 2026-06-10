@@ -3,6 +3,7 @@
 
 1. [](#bugfix)
     * Guests can now use the polling fallback on public channels — the channel pull and publish endpoints accept anonymous requests and let each channel's own access check decide
+    * A failing push transport no longer stops messages from reaching the other transports, so the polling fallback keeps working while a hub is down
 
 # v1.1.2
 ## 06/08/2026
