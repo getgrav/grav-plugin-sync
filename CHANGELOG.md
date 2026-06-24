@@ -1,9 +1,11 @@
 # v1.1.3
-## 06/10/2026
+## 06/24/2026
 
 1. [](#bugfix)
     * Guests can now use the polling fallback on public channels — the channel pull and publish endpoints accept anonymous requests and let each channel's own access check decide
     * A failing push transport no longer stops messages from reaching the other transports, so the polling fallback keeps working while a hub is down
+    * Collaborative editing now works on child pages of a hidden home route, instead of failing to find the page, when "Hide home route in URLs" is enabled ([getgrav/grav-plugin-api#10](https://github.com/getgrav/grav-plugin-api/issues/10))
+    * Save notifications now reach collaborators editing child pages of a hidden home route, so they no longer keep seeing phantom unsaved changes after a peer saves ([getgrav/grav-plugin-admin2#59](https://github.com/getgrav/grav-plugin-admin2/issues/59))
 
 # v1.1.2
 ## 06/08/2026

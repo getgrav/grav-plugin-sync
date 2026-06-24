@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Grav\Plugin\Sync\Tests\Unit;
 
+use Grav\Common\Page\Interfaces\PageInterface;
 use Grav\Plugin\Sync\RoomRegistry;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
@@ -104,5 +105,48 @@ final class RoomRegistryTest extends TestCase
     {
         $this->expectException(RuntimeException::class);
         $this->registry()->parse('no-at-sign');
+    }
+
+    /**
+     * Regression for getgrav/grav-plugin-admin2#59: under
+     * `system.home.hide_in_urls`, a home-folder page's public `route()`
+     * drops the home segment (`/home/my-article` → `/my-article`), but the
+     * editor opens the collab room / page-scoped endpoints by the raw route
+     * (`home/my-article`). `roomForPage()` must key off the raw route so the
+     * `page-saved` broadcast lands on the channel the client subscribes to.
+     */
+    public function test_room_for_page_uses_raw_route_for_home_child(): void
+    {
+        if (!interface_exists(PageInterface::class)) {
+            $this->markTestSkipped('Grav core (PageInterface) not autoloaded in this environment.');
+        }
+        $page = $this->createMock(PageInterface::class);
+        $page->method('route')->willReturn('/my-article');        // hide_in_urls public route
+        $page->method('rawRoute')->willReturn('/home/my-article'); // slug/folder route
+        $page->method('template')->willReturn('default');
+
+        $r = $this->registry();
+        $room = $r->roomForPage($page);
+
+        // Matches the raw-route-derived id the CRDT room / client use…
+        $this->assertSame('home/my-article@default', $room->id);
+        $this->assertSame($r->roomFor('/home/my-article')->id, $room->id);
+        // …and is NOT the home-stripped public route that would silently
+        // diverge from the client's subscription.
+        $this->assertNotSame($r->roomFor('/my-article')->id, $room->id);
+    }
+
+    public function test_room_for_page_raw_route_matches_route_for_non_home_page(): void
+    {
+        if (!interface_exists(PageInterface::class)) {
+            $this->markTestSkipped('Grav core (PageInterface) not autoloaded in this environment.');
+        }
+        $page = $this->createMock(PageInterface::class);
+        $page->method('route')->willReturn('/blog/hello');
+        $page->method('rawRoute')->willReturn('/blog/hello');
+        $page->method('template')->willReturn('item');
+
+        $room = $this->registry()->roomForPage($page, 'fr');
+        $this->assertSame('blog/hello@item@fr', $room->id);
     }
 }

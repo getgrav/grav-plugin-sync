@@ -60,10 +60,21 @@ final class RoomRegistry
 
     /**
      * Resolve from a live Page object.
+     *
+     * Keys off the page's *raw* route (the slug/folder route, home segment
+     * intact) rather than `route()`. Under `system.home.hide_in_urls` the
+     * public `route()` strips the home segment (`home/my-article` →
+     * `/my-article`), but every other room the editor opens — the CRDT
+     * collab room, presence, the page-scoped pull/push endpoints — is keyed
+     * on the raw route admin-next navigates by (`raw_route`). Using
+     * `route()` here would publish `page-saved` broadcasts to a channel id
+     * the client never subscribes to, so home-folder pages under
+     * `hide_in_urls` never receive save notifications. See
+     * getgrav/grav-plugin-admin2#59.
      */
     public function roomForPage(PageInterface $page, ?string $lang = null): SyncRoom
     {
-        $route = $page->route() ?? '';
+        $route = $page->rawRoute() ?: $page->route() ?? '';
         if ($route === '') {
             throw new RuntimeException('sync: page has no route');
         }
