@@ -88,7 +88,21 @@ final class Sync
             if (!$transport->isAvailable()) {
                 continue;
             }
-            $transport->publish($channel, $message);
+            // One broken transport (hub down, service unreachable) must not
+            // silence the others — polling storage in particular is the
+            // fallback subscribers lean on when push is gone.
+            try {
+                $transport->publish($channel, $message);
+            } catch (\Throwable $e) {
+                if (isset($this->grav['log'])) {
+                    $this->grav['log']->warning(sprintf(
+                        "sync: transport '%s' failed publishing to '%s': %s",
+                        $transport->id(),
+                        $channelId,
+                        $e->getMessage()
+                    ));
+                }
+            }
         }
     }
 

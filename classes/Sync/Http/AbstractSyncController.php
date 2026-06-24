@@ -73,6 +73,18 @@ abstract class AbstractSyncController
     }
 
     /**
+     * Like getUser() but for endpoints that admit guests (public-route
+     * optimistic auth): null when no credentials were presented, leaving
+     * the access decision to each channel's authCallback.
+     */
+    protected function getUserOptional(ServerRequestInterface $request): ?UserInterface
+    {
+        $user = $request->getAttribute('api_user');
+
+        return $user instanceof UserInterface ? $user : null;
+    }
+
+    /**
      * Verify the user has the required permission. Mirrors
      * AbstractApiController::requirePermission() when the api plugin is
      * loaded; falls back to a direct access-array lookup otherwise.

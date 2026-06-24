@@ -287,7 +287,7 @@ class SyncController extends AbstractSyncController
      */
     public function channelPull(ServerRequestInterface $request): ResponseInterface
     {
-        $user = $this->getUser($request);
+        $user = $this->getUserOptional($request);
         $channelId = $this->requireChannelId($request);
         $channel = $this->requireChannel($channelId);
 
@@ -330,7 +330,7 @@ class SyncController extends AbstractSyncController
      */
     public function channelPublish(ServerRequestInterface $request): ResponseInterface
     {
-        $user = $this->getUser($request);
+        $user = $this->getUserOptional($request);
         $channelId = $this->requireChannelId($request);
         $channel = $this->requireChannel($channelId);
 
@@ -397,7 +397,7 @@ class SyncController extends AbstractSyncController
         $route = '/' . ltrim((string)$route, '/');
 
         $this->enablePages();
-        $page = $this->grav['pages']->find($route);
+        $page = $this->resolvePage($route);
         if (!$page) {
             throw new NotFoundException("Page not found at route: {$route}");
         }
@@ -413,6 +413,35 @@ class SyncController extends AbstractSyncController
         /** @var \Grav\Common\Page\Pages $pages */
         $pages = $this->grav['pages'];
         $pages->enablePages();
+    }
+
+    /**
+     * Resolve a page by route, with awareness of `system.home.hide_in_urls`.
+     *
+     * Tries the public route first, then falls back to the structural route
+     * via rawRoute(). With a hidden home route, a page at `user/pages/home/<child>`
+     * has the public route `/<child>` but a rawRoute of `/home/<child>` — the
+     * identifier the collab client (admin) addresses it by. Without the
+     * fallback, find('/home/<child>') returns null and the room 404s
+     * (getgrav/grav-plugin-api#10).
+     */
+    private function resolvePage(string $route): ?\Grav\Common\Page\Interfaces\PageInterface
+    {
+        $pages = $this->grav['pages'];
+
+        $page = $pages->find($route);
+        if ($page) {
+            return $page;
+        }
+
+        foreach ($pages->instances() as $candidate) {
+            if ($candidate instanceof \Grav\Common\Page\Interfaces\PageInterface
+                && $candidate->rawRoute() === $route) {
+                return $candidate;
+            }
+        }
+
+        return null;
     }
 
     /**
