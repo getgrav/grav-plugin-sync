@@ -17,12 +17,53 @@ use Psr\Http\Message\ResponseInterface;
  *   - Body wraps the payload as `{"data": <payload>}`.
  *   - Headers include `Content-Type: application/json` (no charset suffix,
  *     to match ApiResponse) and `Cache-Control: no-store, max-age=0`.
- *   - JSON encoded with `JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE`.
+ *   - JSON encoded with `JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE`,
+ *     plus `JSON_INVALID_UTF8_SUBSTITUTE` (see json() below) to match the
+ *     same flag on ApiResponse.
  *   - Uses Grav core's PSR-7 Response so the wire bytes match the api
  *     plugin's, which uses the same class.
  */
 final class SyncResponse
 {
+    /**
+     * Encode a response body without ever handing a `false` to the body.
+     *
+     * json_encode() returns false on malformed UTF-8 and the PSR-7 stream
+     * type-hints a string, so the false surfaced as an unhandled TypeError
+     * instead of a response. JSON_INVALID_UTF8_SUBSTITUTE swaps the bad bytes
+     * for U+FFFD. Mirrors ApiResponse/ErrorResponse in grav-plugin-api, which
+     * this class is contractually byte-identical to.
+     *
+     * @param array<string,mixed> $headers
+     * @param array<string,mixed> $body
+     * @param bool $downgradeOnFailure Whether a hard encoding failure (recursion,
+     *   INF/NAN) should become a 500. False keeps the caller's status, which is
+     *   what the error builder wants: the status is the part a client acts on
+     *   and it is already known good, so only the body degrades.
+     */
+    private static function json(int $status, array $headers, array $body, bool $downgradeOnFailure): ResponseInterface
+    {
+        $flags = JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE;
+
+        $json = json_encode($body, $flags);
+
+        if ($json === false) {
+            $reason = json_last_error_msg();
+
+            if ($downgradeOnFailure) {
+                $status = 500;
+            }
+
+            $json = json_encode([
+                'status' => $status,
+                'title' => $body['title'] ?? 'Error',
+                'detail' => 'The response could not be encoded as JSON: ' . $reason,
+            ], $flags) ?: '{"status":' . $status . ',"title":"Error","detail":"The response could not be encoded as JSON."}';
+        }
+
+        return new Response($status, $headers, $json);
+    }
+
     public static function create(mixed $data, int $status = 200, array $headers = []): ResponseInterface
     {
         $body = ['data' => $data];
@@ -32,11 +73,7 @@ final class SyncResponse
             'Cache-Control' => 'no-store, max-age=0',
         ]);
 
-        return new Response(
-            $status,
-            $headers,
-            json_encode($body, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
-        );
+        return self::json($status, $headers, $body, true);
     }
 
     /**
@@ -62,6 +99,6 @@ final class SyncResponse
             'Cache-Control' => 'no-store, max-age=0',
         ]);
 
-        return new Response($status, $headers, json_encode($body, JSON_UNESCAPED_SLASHES));
+        return self::json($status, $headers, $body, false);
     }
 }
