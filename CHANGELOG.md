@@ -1,5 +1,5 @@
 # v1.1.4
-## 08/01/2026
+## 08/03/2026
 
 1. [](#bugfix)
     * Fixed responses failing outright when the data contained invalid UTF-8. `json_encode()` returns `false` on malformed bytes, which then hit the PSR-7 stream's string type hint and raised an unhandled `TypeError` instead of returning a response. Invalid bytes are now substituted, matching the same fix in the api plugin's `ApiResponse` that this builder is contractually byte-identical to.
