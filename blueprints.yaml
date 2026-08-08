@@ -24,24 +24,24 @@ form:
   fields:
     enabled:
       type: toggle
-      label: Plugin Status
+      label: PLUGIN_SYNC.ENABLED.LABEL
       highlight: 1
       default: 1
       options:
-        1: Enabled
-        0: Disabled
+        1: PLUGIN_SYNC.ENABLED.OPTIONS.ENABLED
+        0: PLUGIN_SYNC.ENABLED.OPTIONS.DISABLED
       validate:
         type: bool
 
     section_transports:
       type: section
-      title: Transports
+      title: PLUGIN_SYNC.SECTION_TRANSPORTS.TITLE
       underline: true
 
     transport_preference:
       type: array
-      label: Transport Preference Order
-      help: Drag rows to reorder. The first available transport in the list handles live delivery; later rows serve as fallbacks. Only transports installed in this Grav instance appear in the dropdown — leave empty to fall back to each transport's built-in priority.
+      label: PLUGIN_SYNC.TRANSPORT_PREFERENCE.LABEL
+      help: PLUGIN_SYNC.TRANSPORT_PREFERENCE.HELP
       value_only: true
       create: false
       data-options@: '\Grav\Plugin\Sync\Transport\TransportRegistry::availableTransports'
@@ -50,75 +50,75 @@ form:
 
     section_storage:
       type: section
-      title: Storage
+      title: PLUGIN_SYNC.SECTION_STORAGE.TITLE
       underline: true
 
     storage.adapter:
       type: select
-      label: Storage Adapter
+      label: PLUGIN_SYNC.STORAGE_ADAPTER.LABEL
       default: auto
-      help: Where Yjs update logs and snapshots are persisted. Auto prefers SQLite when the pdo_sqlite PHP extension is available and falls back to File otherwise. SQLite is recommended for high-concurrency sites — it avoids file-lock contention and survives unclean shutdowns better.
+      help: PLUGIN_SYNC.STORAGE_ADAPTER.HELP
       options:
-        auto: Auto (prefer SQLite when available)
-        file: File (append-only log per room)
-        sqlite: SQLite (one database per room)
+        auto: PLUGIN_SYNC.STORAGE_ADAPTER.OPTIONS.AUTO
+        file: PLUGIN_SYNC.STORAGE_ADAPTER.OPTIONS.FILE
+        sqlite: PLUGIN_SYNC.STORAGE_ADAPTER.OPTIONS.SQLITE
 
     section_squash:
       type: section
-      title: Squash
+      title: PLUGIN_SYNC.SECTION_SQUASH.TITLE
       underline: true
 
     squash.idle_seconds:
       type: number
-      label: Idle Timeout (seconds)
+      label: PLUGIN_SYNC.SQUASH_IDLE_SECONDS.LABEL
       default: 60
-      help: How long a room must have no presence before the collaboration log is squashed back into the canonical markdown file and truncated.
+      help: PLUGIN_SYNC.SQUASH_IDLE_SECONDS.HELP
       validate:
         type: int
         min: 5
 
     squash.max_log_bytes:
       type: number
-      label: Max Log Size (bytes)
+      label: PLUGIN_SYNC.SQUASH_MAX_LOG_BYTES.LABEL
       default: 524288
-      help: Forces an immediate squash when the update log grows beyond this size, regardless of activity. Default 512KB.
+      help: PLUGIN_SYNC.SQUASH_MAX_LOG_BYTES.HELP
       validate:
         type: int
         min: 4096
 
     section_presence:
       type: section
-      title: Presence
+      title: PLUGIN_SYNC.SECTION_PRESENCE.TITLE
       underline: true
 
     presence.ttl_seconds:
       type: number
-      label: Heartbeat TTL (seconds)
+      label: PLUGIN_SYNC.PRESENCE_TTL_SECONDS.LABEL
       default: 30
-      help: How long a client is considered present after its last heartbeat. Tabs that disappear without explicit disconnect time out after this.
+      help: PLUGIN_SYNC.PRESENCE_TTL_SECONDS.HELP
       validate:
         type: int
         min: 5
 
     section_polling:
       type: section
-      title: Polling Defaults
+      title: PLUGIN_SYNC.SECTION_POLLING.TITLE
       underline: true
 
     polling.idle_interval_ms:
       type: number
-      label: Idle Poll Interval (ms)
+      label: PLUGIN_SYNC.POLLING_IDLE_INTERVAL_MS.LABEL
       default: 4000
-      help: How often clients poll when editing alone. Clients use this as a default; servers can suggest a different cadence in the capabilities response.
+      help: PLUGIN_SYNC.POLLING_IDLE_INTERVAL_MS.HELP
       validate:
         type: int
         min: 500
 
     polling.active_interval_ms:
       type: number
-      label: Active Poll Interval (ms)
+      label: PLUGIN_SYNC.POLLING_ACTIVE_INTERVAL_MS.LABEL
       default: 1000
-      help: How often clients poll when at least one other collaborator is present in the same room.
+      help: PLUGIN_SYNC.POLLING_ACTIVE_INTERVAL_MS.HELP
       validate:
         type: int
         min: 250
