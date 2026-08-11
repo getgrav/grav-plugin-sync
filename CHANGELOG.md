@@ -1,3 +1,9 @@
+# v1.1.5
+## 08/11/2026
+
+1. [](#improved)
+    * Sync's admin settings can now be translated, and ship with a Spanish translation (thanks @pmoreno-rodriguez)
+
 # v1.1.4
 ## 08/03/2026
 
