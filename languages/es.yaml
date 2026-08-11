@@ -1,41 +1,48 @@
 PLUGIN_SYNC:
-  ENABLED:
-    LABEL: 'Estado del plugin'
-    OPTIONS:
-      ENABLED: 'Activado'
-      DISABLED: 'Desactivado'
-  SECTION_TRANSPORTS:
-    TITLE: 'Transportes'
-  TRANSPORT_PREFERENCE:
-    LABEL: 'Orden de preferencia de los transportes'
-    HELP: 'Arrastra las filas para reordenarlas. El primer transporte disponible de la lista se encarga de la entrega en tiempo real; las filas siguientes actúan como alternativas. En el desplegable solo aparecen los transportes instalados en esta instancia de Grav — déjalo vacío para usar la prioridad predeterminada de cada transporte.'
-  SECTION_STORAGE:
-    TITLE: 'Almacenamiento'
-  STORAGE_ADAPTER:
-    LABEL: 'Adaptador de almacenamiento'
-    HELP: 'Dónde se guardan los registros de actualizaciones y las instantáneas de Yjs. Auto prioriza SQLite cuando la extensión PHP pdo_sqlite está disponible, y recurre a Archivo en caso contrario. Se recomienda SQLite para sitios de alta concurrencia — evita bloqueos de archivo y se recupera mejor de cierres inesperados.'
-    OPTIONS:
-      AUTO: 'Automático (preferir SQLite si está disponible)'
-      FILE: 'Archivo (registro de solo anexado por sala)'
-      SQLITE: 'SQLite (una base de datos por sala)'
-  SECTION_SQUASH:
-    TITLE: 'Compactación'
-  SQUASH_IDLE_SECONDS:
-    LABEL: 'Tiempo de inactividad (segundos)'
-    HELP: 'Cuánto tiempo debe estar una sala sin presencia antes de que el registro de colaboración se compacte de nuevo en el archivo markdown canónico y se trunque.'
-  SQUASH_MAX_LOG_BYTES:
-    LABEL: 'Tamaño máximo del registro (bytes)'
-    HELP: 'Fuerza una compactación inmediata cuando el registro de actualizaciones supera este tamaño, independientemente de la actividad. Valor predeterminado: 512KB.'
-  SECTION_PRESENCE:
-    TITLE: 'Presencia'
-  PRESENCE_TTL_SECONDS:
-    LABEL: 'TTL del heartbeat (segundos)'
-    HELP: 'Cuánto tiempo se considera presente a un cliente tras su último heartbeat. Las pestañas que desaparecen sin desconexión explícita expiran pasado este tiempo.'
-  SECTION_POLLING:
-    TITLE: 'Configuración predeterminada del sondeo'
-  POLLING_IDLE_INTERVAL_MS:
-    LABEL: 'Intervalo de sondeo en inactividad (ms)'
-    HELP: 'Con qué frecuencia sondean los clientes cuando editan en solitario. Los clientes usan esto como valor predeterminado; los servidores pueden sugerir una cadencia distinta en la respuesta de capacidades.'
-  POLLING_ACTIVE_INTERVAL_MS:
-    LABEL: 'Intervalo de sondeo activo (ms)'
-    HELP: 'Con qué frecuencia sondean los clientes cuando hay al menos otro colaborador presente en la misma sala.'
+  SECTION_TRANSPORTS: 'Transportes'
+  TRANSPORT_PREFERENCE: 'Orden de preferencia de los transportes'
+  TRANSPORT_PREFERENCE_HELP: 'Arrastra las filas para reordenarlas. El primer transporte disponible de la lista se encarga de la entrega en tiempo real; las filas siguientes actúan como alternativas. En el desplegable solo aparecen los transportes instalados en esta instancia de Grav — déjalo vacío para usar la prioridad predeterminada de cada transporte.'
+  SECTION_STORAGE: 'Almacenamiento'
+  STORAGE_ADAPTER: 'Adaptador de almacenamiento'
+  STORAGE_ADAPTER_HELP: 'Dónde se guardan los registros de actualizaciones y las instantáneas de Yjs. Auto prioriza SQLite cuando la extensión PHP pdo_sqlite está disponible, y recurre a Archivo en caso contrario. Se recomienda SQLite para sitios de alta concurrencia — evita bloqueos de archivo y se recupera mejor de cierres inesperados.'
+  STORAGE_ADAPTER_AUTO: 'Automático (preferir SQLite si está disponible)'
+  STORAGE_ADAPTER_FILE: 'Archivo (registro de solo anexado por sala)'
+  STORAGE_ADAPTER_SQLITE: 'SQLite (una base de datos por sala)'
+  SECTION_SQUASH: 'Compactación'
+  SQUASH_IDLE_SECONDS: 'Tiempo de inactividad (segundos)'
+  SQUASH_IDLE_SECONDS_HELP: 'Cuánto tiempo debe estar una sala sin presencia antes de que el registro de colaboración se compacte de nuevo en el archivo markdown canónico y se trunque.'
+  SQUASH_MAX_LOG_BYTES: 'Tamaño máximo del registro (bytes)'
+  SQUASH_MAX_LOG_BYTES_HELP: 'Fuerza una compactación inmediata cuando el registro de actualizaciones supera este tamaño, independientemente de la actividad. Valor predeterminado: 512KB.'
+  SECTION_PRESENCE: 'Presencia'
+  PRESENCE_TTL_SECONDS: 'TTL del heartbeat (segundos)'
+  PRESENCE_TTL_SECONDS_HELP: 'Cuánto tiempo se considera presente a un cliente tras su último heartbeat. Las pestañas que desaparecen sin desconexión explícita expiran pasado este tiempo.'
+  SECTION_POLLING: 'Configuración predeterminada del sondeo'
+  POLLING_IDLE_INTERVAL_MS: 'Intervalo de sondeo en inactividad (ms)'
+  POLLING_IDLE_INTERVAL_MS_HELP: 'Con qué frecuencia sondean los clientes cuando editan en solitario. Los clientes usan esto como valor predeterminado; los servidores pueden sugerir una cadencia distinta en la respuesta de capacidades.'
+  POLLING_ACTIVE_INTERVAL_MS: 'Intervalo de sondeo activo (ms)'
+  POLLING_ACTIVE_INTERVAL_MS_HELP: 'Con qué frecuencia sondean los clientes cuando hay al menos otro colaborador presente en la misma sala.'
+
+ICU:
+  PLUGIN_SYNC:
+    SECTION_TRANSPORTS: 'Transportes'
+    TRANSPORT_PREFERENCE: 'Orden de preferencia de los transportes'
+    TRANSPORT_PREFERENCE_HELP: 'Arrastra las filas para reordenarlas. El primer transporte disponible de la lista se encarga de la entrega en tiempo real; las filas siguientes actúan como alternativas. En el desplegable solo aparecen los transportes instalados en esta instancia de Grav — déjalo vacío para usar la prioridad predeterminada de cada transporte.'
+    SECTION_STORAGE: 'Almacenamiento'
+    STORAGE_ADAPTER: 'Adaptador de almacenamiento'
+    STORAGE_ADAPTER_HELP: 'Dónde se guardan los registros de actualizaciones y las instantáneas de Yjs. Auto prioriza SQLite cuando la extensión PHP pdo_sqlite está disponible, y recurre a Archivo en caso contrario. Se recomienda SQLite para sitios de alta concurrencia — evita bloqueos de archivo y se recupera mejor de cierres inesperados.'
+    STORAGE_ADAPTER_AUTO: 'Automático (preferir SQLite si está disponible)'
+    STORAGE_ADAPTER_FILE: 'Archivo (registro de solo anexado por sala)'
+    STORAGE_ADAPTER_SQLITE: 'SQLite (una base de datos por sala)'
+    SECTION_SQUASH: 'Compactación'
+    SQUASH_IDLE_SECONDS: 'Tiempo de inactividad (segundos)'
+    SQUASH_IDLE_SECONDS_HELP: 'Cuánto tiempo debe estar una sala sin presencia antes de que el registro de colaboración se compacte de nuevo en el archivo markdown canónico y se trunque.'
+    SQUASH_MAX_LOG_BYTES: 'Tamaño máximo del registro (bytes)'
+    SQUASH_MAX_LOG_BYTES_HELP: 'Fuerza una compactación inmediata cuando el registro de actualizaciones supera este tamaño, independientemente de la actividad. Valor predeterminado: 512KB.'
+    SECTION_PRESENCE: 'Presencia'
+    PRESENCE_TTL_SECONDS: 'TTL del heartbeat (segundos)'
+    PRESENCE_TTL_SECONDS_HELP: 'Cuánto tiempo se considera presente a un cliente tras su último heartbeat. Las pestañas que desaparecen sin desconexión explícita expiran pasado este tiempo.'
+    SECTION_POLLING: 'Configuración predeterminada del sondeo'
+    POLLING_IDLE_INTERVAL_MS: 'Intervalo de sondeo en inactividad (ms)'
+    POLLING_IDLE_INTERVAL_MS_HELP: 'Con qué frecuencia sondean los clientes cuando editan en solitario. Los clientes usan esto como valor predeterminado; los servidores pueden sugerir una cadencia distinta en la respuesta de capacidades.'
+    POLLING_ACTIVE_INTERVAL_MS: 'Intervalo de sondeo activo (ms)'
+    POLLING_ACTIVE_INTERVAL_MS_HELP: 'Con qué frecuencia sondean los clientes cuando hay al menos otro colaborador presente en la misma sala.'
