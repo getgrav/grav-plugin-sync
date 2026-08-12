@@ -24,6 +24,8 @@ use Grav\Plugin\Sync\SyncStorage;
 use Grav\Plugin\Sync\Transport\PollingTransport;
 use Grav\Plugin\Sync\Transport\TransportRegistry;
 use RocketTheme\Toolbox\Event\Event;
+use Symfony\Component\Cache\Adapter\FilesystemAdapter;
+use Symfony\Component\Cache\Psr16Cache;
 
 /**
  * Sync plugin - collaboration substrate.
@@ -155,9 +157,19 @@ class SyncPlugin extends Plugin
         };
 
         $this->grav['sync_presence'] = function (): PresenceStore {
-            /** @var \Grav\Common\Cache $cache */
-            $cache = $this->grav['cache'];
             $ttl = (int)$this->config->get('plugins.sync.presence.ttl_seconds', 30);
+
+            // Presence must NOT ride Grav's shared Cache facade: Cache::clearCache()
+            // (called after every page write) touches user/config/system.yaml,
+            // which bumps Config::key(), which rotates the entire cache/grav/<hash>
+            // directory on the next request — silently orphaning every room's
+            // presence data until each peer's next heartbeat lands in the new
+            // folder. Route presence through a dedicated adapter rooted at a
+            // fixed path this plugin owns, same convention as
+            // FileSyncStorage/FileBroadcastStorage below.
+            $dir = rtrim(GRAV_ROOT, '/') . '/user/data/sync/presence';
+            $cache = new Psr16Cache(new FilesystemAdapter(namespace: '', defaultLifetime: 0, directory: $dir));
+
             return new PresenceStore($cache, $ttl);
         };
 
