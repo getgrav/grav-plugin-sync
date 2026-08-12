@@ -6,6 +6,7 @@ namespace Grav\Plugin;
 
 use Composer\Autoload\ClassLoader;
 use Grav\Common\Plugin;
+use Grav\Common\Scheduler\Scheduler;
 use Grav\Common\Uri;
 use Grav\Plugin\Sync\Channel;
 use Grav\Plugin\Sync\ChannelRegistry;
@@ -26,6 +27,7 @@ use Grav\Plugin\Sync\Transport\TransportRegistry;
 use RocketTheme\Toolbox\Event\Event;
 use Symfony\Component\Cache\Adapter\FilesystemAdapter;
 use Symfony\Component\Cache\Psr16Cache;
+use Symfony\Component\Cache\PruneableInterface;
 
 /**
  * Sync plugin - collaboration substrate.
@@ -110,6 +112,9 @@ class SyncPlugin extends Plugin
             // client pulls/subscribes before the first save in this worker has
             // happened. Without this the editor 404s on its initial subscribe.
             'onSyncResolveChannel'        => [['onSyncResolveChannel', 0]],
+            // Register the presence-cache prune job once Grav's task
+            // scheduler boots. See onSchedulerInitialized() below.
+            'onSchedulerInitialized'      => [['onSchedulerInitialized', 0]],
         ];
     }
 
@@ -156,19 +161,32 @@ class SyncPlugin extends Plugin
             throw new \RuntimeException("sync: unsupported storage adapter '{$adapter}'");
         };
 
+        // Presence must NOT ride Grav's shared Cache facade: Cache::clearCache()
+        // (called after every page write) touches user/config/system.yaml,
+        // which bumps Config::key(), which rotates the entire cache/grav/<hash>
+        // directory on the next request — silently orphaning every room's
+        // presence data until each peer's next heartbeat lands in the new
+        // folder. Route presence through a dedicated adapter rooted at a
+        // fixed path this plugin owns, same convention as
+        // FileSyncStorage/FileBroadcastStorage below.
+        //
+        // Registered as its own service (rather than built inline inside
+        // sync_presence) so onSchedulerInitialized can reach the same
+        // adapter instance and prune() it — this cache's entries expire on
+        // their own (heartbeat/peers() purge stale peers on every read,
+        // deleting a room's key once empty), but a room nobody ever revisits
+        // again leaves an orphaned file on disk with nothing to trigger that
+        // read-triggered cleanup. Grav's own cache gets this for free via a
+        // scheduled purge (see Cache::onSchedulerInitialized); ours needs
+        // the same, now that it's no longer riding Grav's cache.
+        $this->grav['sync_presence_cache_adapter'] = function (): FilesystemAdapter {
+            $dir = rtrim(GRAV_ROOT, '/') . '/user/data/sync/presence';
+            return new FilesystemAdapter(namespace: '', defaultLifetime: 0, directory: $dir);
+        };
+
         $this->grav['sync_presence'] = function (): PresenceStore {
             $ttl = (int)$this->config->get('plugins.sync.presence.ttl_seconds', 30);
-
-            // Presence must NOT ride Grav's shared Cache facade: Cache::clearCache()
-            // (called after every page write) touches user/config/system.yaml,
-            // which bumps Config::key(), which rotates the entire cache/grav/<hash>
-            // directory on the next request — silently orphaning every room's
-            // presence data until each peer's next heartbeat lands in the new
-            // folder. Route presence through a dedicated adapter rooted at a
-            // fixed path this plugin owns, same convention as
-            // FileSyncStorage/FileBroadcastStorage below.
-            $dir = rtrim(GRAV_ROOT, '/') . '/user/data/sync/presence';
-            $cache = new Psr16Cache(new FilesystemAdapter(namespace: '', defaultLifetime: 0, directory: $dir));
+            $cache = new Psr16Cache($this->grav['sync_presence_cache_adapter']);
 
             return new PresenceStore($cache, $ttl);
         };
@@ -432,6 +450,31 @@ class SyncPlugin extends Plugin
         }
 
         $this->ensurePageSavedChannel($this->grav['sync'], $channelId);
+    }
+
+    /**
+     * Register a daily job that prunes the presence cache adapter (see the
+     * sync_presence_cache_adapter service above) of any expired entries
+     * nobody has read since they expired. Mirrors
+     * Grav\Common\Cache::onSchedulerInitialized()'s own pattern for the
+     * exact same reason: routine housekeeping for a cache directory this
+     * plugin owns and Grav's built-in cache-clear/purge machinery no
+     * longer touches.
+     */
+    public function onSchedulerInitialized(Event $event): void
+    {
+        /** @var Scheduler $scheduler */
+        $scheduler = $event['scheduler'];
+
+        $name = 'sync-presence-prune';
+        $job = $scheduler->addFunction(function (): void {
+            $adapter = $this->grav['sync_presence_cache_adapter'] ?? null;
+            if ($adapter instanceof PruneableInterface) {
+                $adapter->prune();
+            }
+        }, [], $name);
+        $job->at('0 4 * * *');
+        $job->output('logs/' . $name . '.out');
     }
 
     /**
