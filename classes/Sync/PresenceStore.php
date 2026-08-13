@@ -4,29 +4,28 @@ declare(strict_types=1);
 
 namespace Grav\Plugin\Sync;
 
-use Grav\Common\Cache as GravCache;
 use Psr\SimpleCache\CacheInterface;
 
 /**
  * Ephemeral presence/awareness registry.
  *
- * Backed by whatever PSR-16 cache Grav is configured with (file/apcu/redis/
- * memcache). Each room holds a map of clientId => ['user' => ..., 'meta' =>
- * ..., 'expiresAt' => unix]. Clients must heartbeat before their TTL runs
- * out or they get purged on next read.
+ * Backed by a PSR-16 cache dedicated to this plugin (see sync.php's
+ * `sync_presence` service) — deliberately NOT Grav's shared Cache facade,
+ * whose backing directory rotates on every `Cache::clearCache()`, which
+ * would silently orphan presence data on every page save. Each room holds
+ * a map of clientId => ['user' => ..., 'meta' => ..., 'expiresAt' => unix].
+ * Clients must heartbeat before their TTL runs out or they get purged on
+ * next read.
  *
  * Read shape from peers():
  *   [ ['clientId' => '...', 'user' => '...', 'meta' => [...], 'age' => 3, 'joinedAt' => 1714050000], ... ]
  */
 final class PresenceStore
 {
-    private CacheInterface $cache;
-
     public function __construct(
-        GravCache|CacheInterface $cache,
+        private readonly CacheInterface $cache,
         private readonly int $ttlSeconds = 30,
     ) {
-        $this->cache = $cache instanceof GravCache ? $cache->getSimpleCache() : $cache;
     }
 
     /**

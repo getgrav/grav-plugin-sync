@@ -1,3 +1,9 @@
+# v1.1.6
+## 08/13/2026
+
+1. [](#bugfix)
+    * Collaborators no longer vanish from the "who's here" list right after any page save on the site (thanks @parcand)
+
 # v1.1.5
 ## 08/11/2026
 
