@@ -11,6 +11,7 @@ transport_preference:
 
 storage:
   adapter: auto
+  prune_after_days: 30
 
 squash:
   idle_seconds: 60

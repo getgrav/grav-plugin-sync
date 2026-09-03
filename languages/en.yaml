@@ -8,6 +8,8 @@ PLUGIN_SYNC:
   STORAGE_ADAPTER_AUTO: 'Auto (prefer SQLite when available)'
   STORAGE_ADAPTER_FILE: 'File (append-only log per room)'
   STORAGE_ADAPTER_SQLITE: 'SQLite (one database per room)'
+  STORAGE_PRUNE_AFTER_DAYS: 'Remove unused rooms after'
+  STORAGE_PRUNE_AFTER_DAYS_HELP: "Days a page's collaboration history is kept after the last edit to it. A page that is deleted, renamed, or has its template changed leaves its history behind with nothing else to clean it up. Set to 0 to keep everything."
   SECTION_SQUASH: 'Squash'
   SQUASH_IDLE_SECONDS: 'Idle Timeout (seconds)'
   SQUASH_IDLE_SECONDS_HELP: 'How long a room must have no presence before the collaboration log is squashed back into the canonical markdown file and truncated.'
@@ -33,6 +35,8 @@ ICU:
     STORAGE_ADAPTER_AUTO: 'Auto (prefer SQLite when available)'
     STORAGE_ADAPTER_FILE: 'File (append-only log per room)'
     STORAGE_ADAPTER_SQLITE: 'SQLite (one database per room)'
+    STORAGE_PRUNE_AFTER_DAYS: 'Remove unused rooms after'
+    STORAGE_PRUNE_AFTER_DAYS_HELP: "Days a page's collaboration history is kept after the last edit to it. A page that is deleted, renamed, or has its template changed leaves its history behind with nothing else to clean it up. Set to 0 to keep everything."
     SECTION_SQUASH: 'Squash'
     SQUASH_IDLE_SECONDS: 'Idle Timeout (seconds)'
     SQUASH_IDLE_SECONDS_HELP: 'How long a room must have no presence before the collaboration log is squashed back into the canonical markdown file and truncated.'

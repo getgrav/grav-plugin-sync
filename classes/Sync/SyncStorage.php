@@ -87,4 +87,16 @@ interface SyncStorage
      * Does this room have any storage (log or snapshot)?
      */
     public function exists(string $roomId): bool;
+
+    /**
+     * Delete every room whose storage has been untouched since $cutoff.
+     *
+     * Rooms have no expiry of their own, so one outlives its page whenever the
+     * page is deleted, renamed, or has its template changed without us being
+     * told. Run from the scheduler.
+     *
+     * @param int $cutoff unix timestamp
+     * @return int number of rooms removed
+     */
+    public function pruneRoomsIdleSince(int $cutoff): int;
 }

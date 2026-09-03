@@ -37,6 +37,8 @@ use RuntimeException;
  */
 final class FileSyncStorage implements SyncStorage
 {
+    use PrunesRoomFiles;
+
     public function __construct(
         private readonly string $dataRoot,
         private readonly int $maxUpdateBytes = 10_000_000,

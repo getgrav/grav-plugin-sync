@@ -38,6 +38,8 @@ use RuntimeException;
  */
 final class SqliteSyncStorage implements SyncStorage
 {
+    use PrunesRoomFiles;
+
     /** @var array<string, PDO> Cached PDO handles keyed by absolute db path. */
     private array $connections = [];
 
@@ -255,6 +257,20 @@ final class SqliteSyncStorage implements SyncStorage
             $stmt->execute();
         } catch (PDOException $e) {
             throw new RuntimeException('sync: truncate failed: ' . $e->getMessage(), 0, $e);
+        }
+    }
+
+    /**
+     * Windows in particular won't unlink an open database, so release any handle
+     * pointing at a file we're about to remove.
+     *
+     * @param array $files
+     * @return void
+     */
+    protected function forgetRoomFiles(array $files): void
+    {
+        foreach ($files as $file) {
+            unset($this->connections[$file]);
         }
     }
 

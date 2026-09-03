@@ -1,3 +1,12 @@
+# v1.1.7
+## 09/03/2026
+
+1. [](#new)
+    * A page's collaboration history is now cleaned up when nothing has edited it for a while, with the number of days configurable under Storage. Deleting or renaming a page used to leave its history behind with nothing to remove it [#4](https://github.com/getgrav/grav-plugin-sync/issues/4)
+
+1. [](#bugfix)
+    * Changing a page's template now tells anyone else with that page open, and clears away the collaboration history it left behind, instead of leaving them in a room nothing writes to again [#4](https://github.com/getgrav/grav-plugin-sync/issues/4)
+
 # v1.1.6
 ## 08/13/2026
 

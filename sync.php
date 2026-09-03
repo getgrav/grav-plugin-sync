@@ -421,6 +421,69 @@ class SyncPlugin extends Plugin
             // Sync transport not yet ready, or storage unavailable.
             // Don't let a notification failure abort the save flow.
         }
+
+        $this->retireRoomForPreviousTemplate($event, $page, $rooms, $sync, $payload);
+    }
+
+    /**
+     * Tell anyone still in the room the page used to be in, then take it away.
+     *
+     * A room is keyed on the page's template, so saving a template change maps the
+     * page to a different room and leaves the previous one behind: still holding a
+     * log, still being polled by any editor that had the page open, and never
+     * reached by another save. The template stays in the key deliberately -- a
+     * room holds form field values, and carrying them into a different blueprint
+     * would let a field the new template never declares be written back to the page
+     * through Expert mode, which saves the header wholesale. So the room genuinely
+     * has to change; what was missing is the handover.
+     *
+     * The save is announced on the old room's channel as well, naming the room the
+     * page has moved to, and the old log is deleted. Anything the api plugin didn't
+     * tell us about is caught by the scheduled prune instead.
+     */
+    private function retireRoomForPreviousTemplate(
+        Event $event,
+        \Grav\Common\Page\Interfaces\PageInterface $page,
+        RoomRegistry $rooms,
+        Sync $sync,
+        array $payload
+    ): void {
+        $previous = $event['previous_template'] ?? null;
+        if (!is_string($previous) || $previous === '') {
+            return;
+        }
+
+        try {
+            $lang = $page->language() ?: null;
+            $old = $rooms->roomFor($page->rawRoute() ?: $page->route() ?? '', $lang, $previous);
+        } catch (\Throwable) {
+            return;
+        }
+
+        if ($old->id === ($payload['roomId'] ?? null)) {
+            return;
+        }
+
+        $oldChannel = 'sync:page-saved:' . $old->id;
+
+        try {
+            $this->ensurePageSavedChannel($sync, $oldChannel);
+            $sync->publish($oldChannel, new BroadcastMessage(
+                ['movedTo' => $payload['roomId'] ?? null] + $payload,
+                'page-saved'
+            ));
+        } catch (\Throwable) {
+            // Best effort: the delete below is what actually matters.
+        }
+
+        try {
+            $storage = $this->grav['sync_storage'] ?? null;
+            if ($storage instanceof SyncStorage) {
+                $storage->deleteRoom($old->id);
+            }
+        } catch (\Throwable) {
+            // Leave it for the scheduled prune.
+        }
     }
 
     /**
@@ -474,6 +537,25 @@ class SyncPlugin extends Plugin
             }
         }, [], $name);
         $job->at('0 4 * * *');
+        $job->output('logs/' . $name . '.out');
+
+        // Room logs have no expiry of their own. A room outlives its page
+        // whenever the page is deleted, renamed, or has its template changed
+        // without us being told, and nothing else ever looks at it again -- so it
+        // sits in user/data/sync forever. Same reasoning as the presence prune
+        // above, applied to the logs themselves.
+        $name = 'sync-room-prune';
+        $job = $scheduler->addFunction(function (): void {
+            $storage = $this->grav['sync_storage'] ?? null;
+            if (!$storage instanceof SyncStorage) {
+                return;
+            }
+            $days = (int) $this->config->get('plugins.sync.storage.prune_after_days', 30);
+            if ($days > 0) {
+                $storage->pruneRoomsIdleSince(time() - ($days * 86400));
+            }
+        }, [], $name);
+        $job->at('20 4 * * *');
         $job->output('logs/' . $name . '.out');
     }
 
