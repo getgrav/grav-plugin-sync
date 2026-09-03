@@ -1,7 +1,7 @@
 name: Sync
 slug: sync
 type: plugin
-version: 1.1.6
+version: 1.1.7
 description: Real-time collaboration substrate for Grav. Stores Yjs CRDT updates and presence state for multi-user editing. Transport-agnostic; works with polling, Mercure, or WebSocket providers. Runs on Grav 1.7 and 2.0; integrates with the api plugin when available.
 icon: rotate
 author:
@@ -62,6 +62,15 @@ form:
         auto: PLUGIN_SYNC.STORAGE_ADAPTER_AUTO
         file: PLUGIN_SYNC.STORAGE_ADAPTER_FILE
         sqlite: PLUGIN_SYNC.STORAGE_ADAPTER_SQLITE
+
+    storage.prune_after_days:
+      type: number
+      label: PLUGIN_SYNC.STORAGE_PRUNE_AFTER_DAYS
+      default: 30
+      help: PLUGIN_SYNC.STORAGE_PRUNE_AFTER_DAYS_HELP
+      validate:
+        type: number
+        min: 0
 
     section_squash:
       type: section
