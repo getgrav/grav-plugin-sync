@@ -1,3 +1,9 @@
+# v1.1.9
+## 11/16/2026
+
+1. [](#improved)
+    * Tests and other development files are no longer included in the release zip
+
 # v1.1.8
 ## 09/25/2026
 
